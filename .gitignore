@@ -25,3 +25,9 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Throwaway scratch files from development sessions
+_msg*.txt
+_*.php
+!public/_*.php
+
