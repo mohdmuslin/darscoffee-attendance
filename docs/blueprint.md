@@ -290,18 +290,56 @@ mid-month rate change.
 
 ---
 
-## 10. Decisions Still Open
+## 10. Decisions (settled)
 
-These affect what gets built, so they need answers before the phase that depends
-on them.
+| # | Question | Decision |
+|---|---|---|
+| 1 | **Printed code lifetime** | **No expiry.** A printed code stays valid until a manager or the owner reprints. Reprinting is ad hoc — done when they want to change it, not on a schedule. Built as `expires_at = NULL` + revocation on reprint. |
+| 2 | **Manager rate changes** | **No owner approval.** A manager may set rates directly. The audit record is therefore the only control — see below. |
+| 3 | Payroll export | Record-keeping for now; export shape to be agreed in Phase 6 |
+| 4 | Photo retention | 90 days, configurable (`photo_retention_days`) |
+| 5 | Is `Dars Coffee` the same site as the ordered-from store? | Unresolved, and it does **not** block attendance |
 
-| # | Question | Blocks | Recommendation |
-|---|---|---|---|
-| 1 | **Printed code lifetime** — permanent until revoked, or single-day with a daily reprint? | Phase 1 | Single-day if you want strictness; permanent-until-revoked if you want low maintenance |
-| 2 | **Does a manager's rate change need owner approval?** | Phase 6 | Yes — propose/approve. Otherwise a manager sets their own staff's pay. |
-| 3 | **Payroll export, or record-keeping only?** | Phase 6 | If export, give me the required columns |
-| 4 | **Retention period for photos** | Phase 7 | 90 days unless your accountant says otherwise |
-| 5 | **Is `Dars Coffee` the same site as the synced ordering store?** | Nothing in attendance | Confirm for the ordering system's sake |
+### 10.1 Printed codes: what this means operationally
+
+Choosing no expiry is a deliberate trade-off, and it shifts where the risk sits.
+
+> **A printed code identifies the outlet, not the person's presence.** Anyone who
+> photographs it can punch from home, and nothing in the system can tell. The code
+> keeps working until someone reprints it.
+
+Reprinting is therefore **the revoke mechanism**, and it must be easy — one button
+on the Codes screen, reachable by a manager. If reprinting is awkward, a leaked
+code stays live, so this is a usability requirement rather than a nicety.
+
+What carries the load instead:
+
+| Control | Effect |
+|---|---|
+| Photo on every punch | Deters, and gives evidence in a dispute |
+| PIN | Names the person — shareable, so weak on its own |
+| Shift-window tolerance | Random 03:00 punches are refused or flagged |
+| Anomaly queue | Same PIN at two outlets, long spans, out-of-shift |
+| Reprint | Kills a leaked code, immediately |
+
+### 10.2 Rate changes without approval: the audit is the control
+
+A manager may set what their own staff are paid, and no one countersigns it. That
+is a conscious decision, and it makes one thing non-negotiable:
+
+> **Every rate change records what changed, who changed it, and why.**
+> A reason is required, and the previous value is retained.
+
+Without approval, the audit trail is not a feature — it is the only thing standing
+between a dispute and an argument. Two consequences for the build:
+
+1. `rate_adjustments.reason` is **mandatory**, and `created_by` is never null.
+2. Rate rows are **never updated in place**. A change closes the current row and
+   inserts a new one, so "what was he paid in March?" stays answerable even after
+   a later raise.
+
+The owner still sees every change in the console, flagged as a manager's edit. The
+choice removes the second signature, not the visibility.
 
 ---
 

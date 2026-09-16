@@ -1,0 +1,50 @@
+Record the settled decisions and seed the three outlets
+
+Decisions (blueprint.md §10), both confirmed by the owner:
+
+1. Printed codes DO NOT EXPIRE. A sheet stays valid until a manager or the owner
+   reprints, on whatever ad hoc basis they choose. This makes REPRINTING THE
+   REVOKE MECHANISM, so it has to stay a one-click action — if reprinting is
+   awkward, a leaked code stays live indefinitely. Documented rather than assumed,
+   because the trade-off (a printed code identifies the outlet, not the person's
+   presence) is real and the compensating controls carry the load.
+
+2. Rate changes need NO owner approval. A manager may set rates for their own
+   staff. That removes the second signature, so the audit record becomes the only
+   control: a reason is mandatory, the previous value is kept, and manager edits
+   are surfaced to the owner via two new AnomalyType cases
+   (MANAGER_RATE_CHANGE, MANAGER_CORRECTION) with isOversightRecord() to
+   distinguish oversight from fault. The owner still SEES every change; the choice
+   removed the approval, not the visibility.
+
+Seeds
+- OutletSeeder: the three outlets, matched by code so re-running is a no-op.
+  Matched by code rather than name deliberately — the ordering project's seeder
+  matched a store by NAME and quietly created a second location when the name
+  changed. Settings defaulted with a guard so re-seeding never overwrites a
+  choice the owner already made.
+- OwnerSeeder: owner account only. Managers are created in the console with their
+  outlet mapping, because a manager with no mapping sees NOTHING (the scope fails
+  closed), so a half-configured manager account would be a trap.
+- DatabaseSeeder keeps WithoutModelEvents OFF. The ordering project used it and it
+  silently broke token generation, because models relying on model events to
+  populate a column get nulls when events are suppressed.
+- UserFactory now sets role explicitly and gains manager()/forOutlets()/
+  deactivated(). Without a role, factory users defaulted to manager with no
+  mapping and silently returned empty results.
+
+Two bugs found and fixed while testing
+- Outlet had no cast for `token_mode`, so it was a bare string and
+  `$outlet->token_mode->expires()` would have failed at runtime — in production,
+  at the punch endpoint. The seeder storing the enum's value looked correct in the
+  database, which is what made it easy to miss.
+- A reprinted code stayed usable for a further 60 seconds. The clock-skew
+  tolerance meant for client-supplied offline timestamps was being applied to
+  live scans too. Now split explicitly: isLive() is STRICT (the server's clock is
+  authoritative, so a revoked code dies immediately), while wasLiveAt() keeps the
+  minute of tolerance for phone-supplied times. Applying tolerance to a live scan
+  would leave a leaked code usable for exactly the window an attacker waits for.
+
+Tests: OutletTokenLifecycleTest (15) covering reprint/revoke, rotating renewal,
+clock skew, offlined punches against rotated codes, and deactivated outlets.
+30 passing, Pint clean.

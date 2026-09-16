@@ -99,6 +99,24 @@ php artisan serve        # http://127.0.0.1:8000
 
 ---
 
+## Decisions settled
+
+| Question | Decision |
+|---|---|
+| Printed code lifetime | **No expiry** — valid until reprinted. Reprinting is ad hoc, when the manager wants, and is the revoke mechanism. |
+| Manager rate changes | **No owner approval.** The audit record (mandatory reason, previous value kept) is the control. |
+| Payroll export | Record-keeping for now; shape agreed in Phase 6 |
+| Photo retention | 90 days, configurable |
+
+> **Printed codes carry a known trade-off.** They identify the outlet, not the
+> person's presence, so a photographed sheet works until someone reprints. The
+> controls that carry the load are the punch photo, the shift window, the anomaly
+> queue, and reprinting — which is why **reprinting must stay a one-click action**.
+
+See `docs/blueprint.md` §10 for the reasoning.
+
+---
+
 ## Plan
 
 | Phase | Delivers |
@@ -114,13 +132,3 @@ php artisan serve        # http://127.0.0.1:8000
 Phase 3 is the deployment point: hours capture plus corrections is useful on its
 own, and living with it for a few weeks reveals the real shift and pay rules far
 better than guessing them up front.
-
----
-
-## Before implementation
-
-Five decisions are still open — see `docs/blueprint.md` §10. The two that change
-what gets built first:
-
-1. **Printed code lifetime** — permanent until revoked, or single-day reprint?
-2. **Does a manager's rate change need owner approval?**

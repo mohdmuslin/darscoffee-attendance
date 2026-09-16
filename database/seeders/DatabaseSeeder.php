@@ -2,24 +2,26 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
+/**
+ * Seeds the facts about the business: the three outlets, the owner account, and
+ * the runtime settings this system reads.
+ *
+ * NOTICE: `WithoutModelEvents` is deliberately NOT used.
+ *
+ * The ordering project used it and it silently broke token generation, because
+ * models that rely on model events to populate a column get nulls when events are
+ * suppressed. This system assigns PINs and outlet codes that will follow the same
+ * pattern, so the trait is left off rather than rediscovered later.
+ */
 class DatabaseSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
-    /**
-     * Seed the application's database.
-     */
     public function run(): void
     {
-        // User::factory(10)->create();
-
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
+        $this->call([
+            OutletSeeder::class,
+            OwnerSeeder::class,
         ]);
     }
 }

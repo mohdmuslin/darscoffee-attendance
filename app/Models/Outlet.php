@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\OutletTokenMode;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -19,6 +20,13 @@ class Outlet extends Model
     protected function casts(): array
     {
         return [
+            /*
+             * Cast so `token_mode` is the enum everywhere, not a bare string.
+             * Without this, `$outlet->token_mode->expires()` fails at runtime —
+             * and a seeder that stores the enum's value silently produces a string
+             * that looks correct in the database.
+             */
+            'token_mode' => OutletTokenMode::class,
             'qr_ttl_seconds' => 'integer',
             'requires_photo' => 'boolean',
             'is_active' => 'boolean',

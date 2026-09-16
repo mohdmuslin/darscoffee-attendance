@@ -58,14 +58,25 @@ class OutletToken extends Model
         ]);
     }
 
-    /** Usable right now: not revoked, and not past its window. */
+    /**
+     * Usable right now: not revoked, not past its window, not before it existed.
+     *
+     * STRICT, with no clock-skew tolerance, because the server's own clock is
+     * authoritative here — there is no remote clock to disagree with. A revoked
+     * code must stop working the instant it is revoked; the whole point of
+     * reprinting after a leak is that the old sheet dies immediately.
+     */
     public function isLive(): bool
     {
         if ($this->revoked_at !== null) {
             return false;
         }
 
-        return $this->expires_at === null || $this->expires_at->isFuture();
+        if ($this->expires_at !== null && $this->expires_at->isPast()) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -76,20 +87,36 @@ class OutletToken extends Model
      * against "now". Judging only against now would reject every offline punch
      * made on a rotating outlet, because the code will have rotated by the time
      * the phone regains signal.
+     *
+     * CLOCK SKEW TOLERANCE. The timestamp here comes from the employee's phone,
+     * and phone clocks are not reliably in step with the server. Without slack, a
+     * phone running even slightly behind would have its legitimate punches refused
+     * as "before this code existed" — and the employee would be standing at the
+     * counter unable to clock in, with nothing they could do about it.
+     *
+     * The tolerance is deliberately small (a minute). It absorbs clock drift while
+     * still refusing a punch back-dated to before the code was issued, which is
+     * the attack that matters: obtaining today's code and claiming to have worked
+     * yesterday.
      */
+    private const SKEW_TOLERANCE_SECONDS = 60;
+
     public function wasLiveAt(\DateTimeInterface $at): bool
     {
         $at = CarbonImmutable::instance($at);
+        $tolerance = self::SKEW_TOLERANCE_SECONDS;
 
-        if ($this->created_at !== null && $at->lessThan($this->created_at)) {
+        // Punched before the code existed, beyond the skew allowance.
+        if ($this->created_at !== null && $at->lessThan($this->created_at->subSeconds($tolerance))) {
             return false;
         }
 
-        if ($this->revoked_at !== null && $at->greaterThanOrEqualTo($this->revoked_at)) {
+        // Punched after revocation, beyond the skew allowance.
+        if ($this->revoked_at !== null && $at->greaterThan($this->revoked_at->addSeconds($tolerance))) {
             return false;
         }
 
-        if ($this->expires_at !== null && $at->greaterThan($this->expires_at)) {
+        if ($this->expires_at !== null && $at->greaterThan($this->expires_at->addSeconds($tolerance))) {
             return false;
         }
 

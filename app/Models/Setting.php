@@ -19,7 +19,17 @@ class Setting extends Model
     /** How long punch photos are kept (PDPA minimisation). */
     public const PHOTO_RETENTION_DAYS = 'photo_retention_days';
 
-    /** Whether a manager's rate change must be approved by the owner. */
+    /**
+     * Whether a manager's rate change must be approved by the owner.
+     *
+     * DECIDED OFF (2026-09-16): a manager may set rates directly for their own
+     * staff. That makes the audit record the only control, so rate changes always
+     * require a reason and always keep the previous value — see
+     * `AnomalyType::MANAGER_RATE_CHANGE` and the `rate_adjustments` table.
+     *
+     * Kept as a setting rather than removed, because an owner may reasonably want
+     * to switch approval on later without a code change.
+     */
     public const REQUIRE_RATE_APPROVAL = 'require_rate_approval';
 
     /** Failed PIN attempts before lockout. */

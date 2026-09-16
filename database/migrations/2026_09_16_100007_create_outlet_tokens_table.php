@@ -14,9 +14,18 @@ use Illuminate\Support\Facades\Schema;
  *   rotating  expires_at set   — short window, shown on a device
  *
  * "Latest applicable" is implemented by revoking: generating a new code for an
- * outlet kills the previous live one in the same transaction. That is what makes
- * reprinting a sheet safe, and it is the only recovery path when a printed code
- * is photographed and shared.
+ * outlet kills the previous live one in the same transaction.
+ *
+ * PRINTED CODES DO NOT EXPIRE (decided 2026-09-16). A printed sheet stays valid
+ * until a manager or the owner reprints it, on whatever ad hoc basis they choose —
+ * not on a daily or weekly schedule. That is a deliberate trade-off: a printed
+ * code identifies the OUTLET, not the person's presence, so anyone who photographs
+ * it can punch from home and nothing here can tell. The compensating controls are
+ * the punch photo, the shift window, the anomaly queue, and reprinting.
+ *
+ * The practical consequence for the build: REPRINTING IS THE REVOKE MECHANISM and
+ * must be one obvious action on the Codes screen. If reprinting is awkward, a
+ * leaked code stays live, so this is a usability requirement rather than a nicety.
  */
 return new class extends Migration
 {
