@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, intl, pdo_sqlite, pdo_mysql, curl, zip, gd
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install PHP dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Install and build frontend
+        run: |
+          npm ci
+          npm run build
+
+      # The test suite runs on SQLite in-memory for speed. The one-open-segment
+      # invariant is implemented differently per driver (partial unique index on
+      # SQLite, generated column on MySQL) and the two were verified to behave
+      # identically, so SQLite genuinely proves the behaviour rather than
+      # approximating it.
+      - name: Run tests
+        run: php vendor/bin/pest --compact
+
+      - name: Check code style
+        run: php vendor/bin/pint --test
+
+  # Migrations are also run against MySQL, because that is production and the
+  # invariant uses driver-specific SQL that SQLite tests cannot exercise.
+  mysql-migrations:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: dars_attendance
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -ppassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, intl, pdo_mysql, curl, zip
+          coverage: none
+
+      - name: Install PHP dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          sed -i 's/^DB_CONNECTION=.*/DB_CONNECTION=mysql/' .env
+          sed -i 's/^# DB_HOST=.*/DB_HOST=127.0.0.1/' .env
+          sed -i 's/^# DB_PORT=.*/DB_PORT=3306/' .env
+          sed -i 's/^# DB_DATABASE=.*/DB_DATABASE=dars_attendance/' .env
+          sed -i 's/^# DB_USERNAME=.*/DB_USERNAME=root/' .env
+          sed -i 's/^# DB_PASSWORD=.*/DB_PASSWORD=password/' .env
+
+      - name: Migrate against MySQL
+        run: php artisan migrate:fresh --force
+
+      - name: Assert the one-open-segment invariant exists
+        run: |
+          php -r '
+          $pdo = new PDO("mysql:host=127.0.0.1;dbname=dars_attendance", "root", "password");
+          $row = $pdo->query("SHOW INDEX FROM time_entries WHERE Key_name = \"uniq_open_segment\"")->fetch();
+          if (! $row || (int) $row["Non_unique"] !== 0) {
+              fwrite(STDERR, "uniq_open_segment is missing or not unique\n");
+              exit(1);
+          }
+          echo "uniq_open_segment present and unique\n";
+          '

@@ -1,5 +1,8 @@
 <?php
 
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
 /*
 |--------------------------------------------------------------------------
 | Pest configuration
@@ -11,12 +14,12 @@
 */
 
 uses(
-    Tests\TestCase::class,
-    Illuminate\Foundation\Testing\RefreshDatabase::class,
+    TestCase::class,
+    RefreshDatabase::class,
 )->in('Feature');
 
 /*
  * Unit tests get the application but NOT the database: anything needing a schema
  * belongs in Feature, where RefreshDatabase keeps tests isolated.
  */
-uses(Tests\TestCase::class)->in('Unit');
+uses(TestCase::class)->in('Unit');

@@ -1,9 +1,21 @@
 @import 'tailwindcss';
 
+/*
+ * Tailwind scans these for class names. The Vue SFCs are picked up by the Vite
+ * plugin automatically; the extra sources cover Blade and compiled views.
+ */
+@source '../js/**/*.vue';
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
+@source '../../resources/views/*.blade.php';
 
+/*
+ * No webfont. The punch screen is used one-handed in a kitchen on whatever
+ * connection is available, so the system font stack is faster and one less thing
+ * to fail. The ordering system loads Instrument Sans; this app deliberately does
+ * not.
+ */
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
-        'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+        'Helvetica Neue', Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
 }

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\TimeEntryStatus;
 use App\Enums\TimeEntryType;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -63,7 +64,7 @@ class TimeEntry extends Model
      */
     public function close(?\DateTimeInterface $at = null, ?string $photoPath = null, ?int $tokenId = null): void
     {
-        $endedAt = $at ? \Carbon\CarbonImmutable::instance($at) : now();
+        $endedAt = $at ? CarbonImmutable::instance($at) : now();
 
         $this->forceFill([
             'ended_at' => $endedAt,

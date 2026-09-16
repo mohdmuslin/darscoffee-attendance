@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\OutletTokenMode;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -78,7 +79,7 @@ class OutletToken extends Model
      */
     public function wasLiveAt(\DateTimeInterface $at): bool
     {
-        $at = \Carbon\CarbonImmutable::instance($at);
+        $at = CarbonImmutable::instance($at);
 
         if ($this->created_at !== null && $at->lessThan($this->created_at)) {
             return false;
