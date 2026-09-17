@@ -2,8 +2,12 @@
 
 namespace App\Providers;
 
+use App\Models\Anomaly;
+use App\Models\AttendanceCorrection;
 use App\Models\Employee;
 use App\Models\User;
+use App\Policies\AnomalyPolicy;
+use App\Policies\CorrectionPolicy;
 use App\Policies\EmployeePolicy;
 use App\Services\SsoTokenService;
 use Illuminate\Support\Facades\Gate;
@@ -25,6 +29,8 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Gate::policy(Employee::class, EmployeePolicy::class);
+        Gate::policy(AttendanceCorrection::class, CorrectionPolicy::class);
+        Gate::policy(Anomaly::class, AnomalyPolicy::class);
 
         /*
          * Owners pass every authorisation check; managers are checked against their

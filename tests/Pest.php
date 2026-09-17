@@ -1,5 +1,7 @@
 <?php
 
+use App\Enums\UserRole;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -50,4 +52,31 @@ function freshRequest(): void
      * reaching for its protected `$app` property, which is not accessible here.
      */
     app('auth')->forgetGuards();
+}
+
+/**
+ * Bearer auth headers for a console user.
+ *
+ * Shared here rather than defined in each test file: Pest loads every feature file into
+ * one process, so a helper declared twice is a fatal "cannot redeclare" that takes out
+ * the WHOLE suite rather than one file. Keeping it in one place removes the possibility.
+ *
+ * @return array<string, string>
+ */
+function asUser(User $user): array
+{
+    return ['Authorization' => 'Bearer '.$user->createToken('test')->plainTextToken];
+}
+
+/**
+ * Run the suite as an owner.
+ *
+ * Most Phase 3 endpoints are owner-only, so tests that are not about scoping would
+ * otherwise repeat the same three lines.
+ *
+ * @return array<string, string>
+ */
+function asOwner(): array
+{
+    return asUser(User::where('role', UserRole::OWNER->value)->firstOrFail());
 }

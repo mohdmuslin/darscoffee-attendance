@@ -36,11 +36,6 @@ beforeEach(function () {
     $this->santaiStaff->outlets()->attach($this->santai->id, ['is_primary' => true]);
 });
 
-function asUser(User $user): array
-{
-    return ['Authorization' => 'Bearer '.$user->createToken('test')->plainTextToken];
-}
-
 // ---- Listing ---------------------------------------------------------
 
 it('shows an owner every employee', function () {

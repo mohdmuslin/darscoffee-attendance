@@ -59,6 +59,37 @@ const routes = [
         component: () => import('./views/AccountsView.vue'),
         meta: { ownerOnly: true },
     },
+    {
+        /*
+         * Phase 3. Timesheets are the reason the system exists, so they sit in the main
+         * navigation rather than behind a report menu — a manager looking for last week's
+         * hours should not have to go hunting.
+         */
+        path: '/timesheets',
+        name: 'timesheets',
+        component: () => import('./views/TimesheetView.vue'),
+    },
+    {
+        path: '/timesheets/employees/:id',
+        name: 'employee-timesheet',
+        component: () => import('./views/EmployeeTimesheetView.vue'),
+        props: true,
+    },
+    {
+        /*
+         * Corrections and anomalies are visible to a manager even though only the owner can
+         * approve, or dismiss a manager's request. A manager who cannot see what is waiting
+         * has no way to explain to staff why their hours have not changed yet.
+         */
+        path: '/corrections',
+        name: 'corrections',
+        component: () => import('./views/CorrectionsView.vue'),
+    },
+    {
+        path: '/anomalies',
+        name: 'anomalies',
+        component: () => import('./views/AnomaliesView.vue'),
+    },
 ];
 
 const router = createRouter({

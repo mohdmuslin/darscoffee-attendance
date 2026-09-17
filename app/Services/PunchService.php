@@ -3,11 +3,13 @@
 namespace App\Services;
 
 use App\Enums\AnomalyType;
+use App\Enums\PunchEventType;
 use App\Enums\TimeEntryStatus;
 use App\Enums\TimeEntryType;
 use App\Models\Anomaly;
 use App\Models\Employee;
 use App\Models\Outlet;
+use App\Models\PunchEvent;
 use App\Models\PunchSession;
 use App\Models\Setting;
 use App\Models\Shift;
@@ -92,6 +94,20 @@ class PunchService
              */
             $this->recordFailedAttempt($candidates);
 
+            /*
+             * Written to the trail with NO employee id, because identity is precisely
+             * what is unknown. A run of these against one code is the signature of
+             * someone working through PINs rather than a person mistyping — which is only
+             * visible if the failures are recorded.
+             */
+            PunchEvent::record(
+                PunchEventType::PIN_FAILED,
+                outletId: $outlet->id,
+                tokenId: $token->id,
+                ipAddress: $ip,
+                meta: ['candidates' => $candidates->count()],
+            );
+
             return null;
         }
 
@@ -108,6 +124,15 @@ class PunchService
             'device' => $device,
             'ip_address' => $ip,
         ]);
+
+        PunchEvent::record(
+            PunchEventType::SCAN,
+            employeeId: $employee->id,
+            outletId: $outlet->id,
+            tokenId: $token->id,
+            ipAddress: $ip,
+            meta: ['device' => $device],
+        );
 
         // The plaintext is returned to the caller and NEVER stored, so this is the only
         // moment it exists.

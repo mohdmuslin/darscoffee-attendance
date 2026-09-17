@@ -44,6 +44,20 @@ class Setting extends Model
     /** Hours after which an open segment is assumed forgotten. */
     public const MISSING_CLOCKOUT_HOURS = 'missing_clockout_hours';
 
+    /**
+     * Whether a manager's correction needs the owner's approval.
+     *
+     * DECIDED ON (default true), unlike rate changes. The two are not equivalent: a rate
+     * change alters what future hours are worth and is visible in the rate history, while
+     * a correction alters the hours themselves — the record the whole system exists to
+     * make trustworthy. A manager being able to rewrite their own staff's hours without
+     * anyone countersigning makes the timesheet self-certifying.
+     *
+     * An owner's own corrections never need approval, so this does not slow down the
+     * person who is already the final authority.
+     */
+    public const REQUIRE_CORRECTION_APPROVAL = 'require_correction_approval';
+
     public static function get(string $key, mixed $default = null): mixed
     {
         return static::query()->where('key', $key)->value('value') ?? $default;

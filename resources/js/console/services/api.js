@@ -168,6 +168,140 @@ export const userApi = {
 };
 
 /**
+ * Timesheets — read only, all of it.
+ *
+ * There is deliberately no method here that writes a time entry. Time is changed
+ * through a correction and nothing else, because a direct write would leave no record
+ * of who changed what, or why.
+ */
+export const timesheetApi = {
+    async summary(params = {}) {
+        const { data } = await http.get('/admin/timesheets/summary', { params });
+
+        return data.data;
+    },
+
+    async forEmployee(id, params = {}) {
+        const { data } = await http.get(`/admin/timesheets/employees/${id}`, { params });
+
+        return data.data.timesheet;
+    },
+
+    async entries(params = {}) {
+        const { data } = await http.get('/admin/timesheets/entries', { params });
+
+        return data.data;
+    },
+
+    /**
+     * Trigger the CSV download.
+     *
+     * Fetched as a blob rather than pointed at with a link: the endpoint is behind a
+     * bearer token, and an <a href> cannot send an Authorization header — the same
+     * problem the signed photo URLs exist to avoid.
+     */
+    async downloadCsv(params = {}) {
+        const response = await http.get('/admin/timesheets/export', {
+            params,
+            responseType: 'blob',
+        });
+
+        const url = URL.createObjectURL(response.data);
+        const link = document.createElement('a');
+
+        link.href = url;
+        link.download = filenameFrom(response.headers['content-disposition'])
+            ?? `timesheet-${params.from ?? 'export'}.csv`;
+
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        // Revoked immediately: an object URL is held by the document until released, so
+        // leaving it leaks the whole file for the life of the tab.
+        URL.revokeObjectURL(url);
+    },
+};
+
+/** Pull the server's filename out of Content-Disposition, if it sent one. */
+function filenameFrom(disposition) {
+    if (! disposition) {
+        return null;
+    }
+
+    const match = /filename="?([^";]+)"?/i.exec(disposition);
+
+    return match ? match[1] : null;
+}
+
+export const correctionApi = {
+    async list(params = {}) {
+        const { data } = await http.get('/admin/corrections', { params });
+
+        return data.data;
+    },
+
+    async pendingCount() {
+        const { data } = await http.get('/admin/corrections/pending-count');
+
+        return data.data.pending;
+    },
+
+    /** Change a recorded entry. Needs a reason; the server refuses without one. */
+    async requestChange(entryId, changes, reason) {
+        const { data } = await http.post(`/admin/corrections/entries/${entryId}`, { changes, reason });
+
+        return data.data.correction;
+    },
+
+    /** Record a punch that never happened, for a shift with nothing to amend. */
+    async requestMissing(payload) {
+        const { data } = await http.post('/admin/corrections/missing', payload);
+
+        return data.data.correction;
+    },
+
+    async history(entryId) {
+        const { data } = await http.get(`/admin/corrections/entries/${entryId}/history`);
+
+        return data.data;
+    },
+
+    async approve(id, note = null) {
+        const { data } = await http.post(`/admin/corrections/${id}/approve`, { note });
+
+        return data.data.correction;
+    },
+
+    async reject(id, note = null) {
+        const { data } = await http.post(`/admin/corrections/${id}/reject`, { note });
+
+        return data.data.correction;
+    },
+};
+
+export const anomalyApi = {
+    async list(params = {}) {
+        const { data } = await http.get('/admin/anomalies', { params });
+
+        return data.data;
+    },
+
+    async review(id, note = null) {
+        const { data } = await http.post(`/admin/anomalies/${id}/review`, { note });
+
+        return data.data.anomaly;
+    },
+
+    /** The punch audit trail, including the failed attempts. */
+    async events(params = {}) {
+        const { data } = await http.get('/admin/punch-events', { params });
+
+        return data.data;
+    },
+};
+
+/**
  * Where the console keeps its token.
  *
  * Applied at module scope on load (see main.js) rather than inside a store action,

@@ -16,8 +16,11 @@ const isLogin = computed(() => route.meta.public === true);
  */
 const links = computed(() => [
     { name: 'dashboard', label: 'Dashboard', show: true },
+    { name: 'timesheets', label: 'Timesheets', show: auth.canAdminister },
     { name: 'employees', label: 'Employees', show: auth.canAdminister },
     { name: 'outlets', label: 'Outlets & codes', show: auth.canAdminister },
+    { name: 'anomalies', label: 'Anomalies', show: auth.canAdminister },
+    { name: 'corrections', label: 'Corrections', show: auth.canAdminister },
     { name: 'accounts', label: 'Accounts', show: auth.isOwner },
 ].filter((link) => link.show));
 

@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -30,6 +32,32 @@ class Shift extends Model
             'ends_at' => 'datetime',
             'cancelled_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Normalise the shift times to UTC on the way in.
+     *
+     * Same hazard as TimeEntry, and it bit hardest here: a manager enters a roster in the
+     * outlet's LOCAL time, and the `datetime` cast does not convert — so 09:00+08:00 was
+     * written as "09:00" and read back as 09:00 UTC, eight hours late. Every lateness and
+     * early-out figure was then computed against a shift that had moved, which showed up as
+     * arrivals that were never late and departures reported as eight hours early.
+     *
+     * @return Attribute<CarbonImmutable, never>
+     */
+    protected function startsAt(): Attribute
+    {
+        return Attribute::make(
+            set: fn ($value) => $value === null ? null : CarbonImmutable::parse($value)->utc(),
+        );
+    }
+
+    /** @return Attribute<CarbonImmutable, never> */
+    protected function endsAt(): Attribute
+    {
+        return Attribute::make(
+            set: fn ($value) => $value === null ? null : CarbonImmutable::parse($value)->utc(),
+        );
     }
 
     public function isCancelled(): bool

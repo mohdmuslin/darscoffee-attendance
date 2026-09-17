@@ -7,6 +7,7 @@ use App\Enums\TimeEntryType;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -37,6 +38,39 @@ class TimeEntry extends Model
             'duration_seconds' => 'integer',
             'is_offline_sync' => 'boolean',
         ];
+    }
+
+    /**
+     * Normalise timestamps to UTC on the way in.
+     *
+     * The `datetime` cast formats a Carbon with `$dateFormat` and does NOT convert it to
+     * the application timezone first. So assigning 09:00+08:00 writes the literal string
+     * "09:00", which then reads back as 09:00 UTC — the same instant, eight hours later
+     * than intended.
+     *
+     * Nothing caught this until corrections, because the punch flow uses `now()`, which
+     * is already UTC and so round-trips correctly. Any caller supplying a time in an
+     * outlet's local zone — a correction, an import, an offline queue — would silently
+     * shift the hours. Converting here means no caller has to know.
+     *
+     * `parse` rather than `instance`, because a raw insert or a seeder may hand over a
+     * string; `instance` rejects one outright.
+     *
+     * @return Attribute<CarbonImmutable, never>
+     */
+    protected function startedAt(): Attribute
+    {
+        return Attribute::make(
+            set: fn ($value) => $value === null ? null : CarbonImmutable::parse($value)->utc(),
+        );
+    }
+
+    /** @return Attribute<CarbonImmutable, never> */
+    protected function endedAt(): Attribute
+    {
+        return Attribute::make(
+            set: fn ($value) => $value === null ? null : CarbonImmutable::parse($value)->utc(),
+        );
     }
 
     /**

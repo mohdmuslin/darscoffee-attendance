@@ -1,7 +1,10 @@
 <?php
 
+use App\Http\Controllers\Api\V1\Admin\AdminAnomalyController;
+use App\Http\Controllers\Api\V1\Admin\AdminCorrectionController;
 use App\Http\Controllers\Api\V1\Admin\AdminEmployeeController;
 use App\Http\Controllers\Api\V1\Admin\AdminOutletController;
+use App\Http\Controllers\Api\V1\Admin\AdminTimesheetController;
 use App\Http\Controllers\Api\V1\Admin\AdminUserController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\PhotoController;
@@ -91,6 +94,42 @@ Route::prefix('v1')->group(function () {
             Route::patch('users/{user}', [AdminUserController::class, 'update'])->name('users.update');
             Route::post('users/{user}/deactivate', [AdminUserController::class, 'deactivate'])->name('users.deactivate');
             Route::post('users/{user}/activate', [AdminUserController::class, 'activate'])->name('users.activate');
+
+            /*
+             * ---- Timesheets -------------------------------------------
+             *
+             * Read only, all of it. Time is changed through a correction and nothing
+             * else, so there is deliberately no endpoint here that writes an entry —
+             * a direct write would leave no record of who changed what, or why.
+             */
+            Route::get('timesheets/summary', [AdminTimesheetController::class, 'summary'])->name('timesheets.summary');
+            Route::get('timesheets/entries', [AdminTimesheetController::class, 'entries'])->name('timesheets.entries');
+            // Declared before the {employee} route so "export" is not read as an id.
+            Route::get('timesheets/export', [AdminTimesheetController::class, 'export'])->name('timesheets.export');
+            Route::get('timesheets/employees/{employee}', [AdminTimesheetController::class, 'employee'])->name('timesheets.employee');
+
+            /*
+             * ---- Corrections ------------------------------------------
+             *
+             * A manager may raise one for their own outlet; only an owner may approve.
+             * That asymmetry is the control — see AdminCorrectionController.
+             */
+            Route::get('corrections', [AdminCorrectionController::class, 'index'])->name('corrections.index');
+            Route::get('corrections/pending-count', [AdminCorrectionController::class, 'pendingCount'])->name('corrections.pending-count');
+            Route::post('corrections/missing', [AdminCorrectionController::class, 'storeMissing'])->name('corrections.store-missing');
+            Route::post('corrections/entries/{entry}', [AdminCorrectionController::class, 'store'])->name('corrections.store');
+            Route::get('corrections/entries/{entry}/history', [AdminCorrectionController::class, 'history'])->name('corrections.history');
+            Route::post('corrections/{correction}/approve', [AdminCorrectionController::class, 'approve'])->name('corrections.approve');
+            Route::post('corrections/{correction}/reject', [AdminCorrectionController::class, 'reject'])->name('corrections.reject');
+
+            /*
+             * ---- Anomaly queue and the punch audit trail ---------------
+             *
+             * The compensating control for buddy punching: nothing odd passes silently.
+             */
+            Route::get('anomalies', [AdminAnomalyController::class, 'index'])->name('anomalies.index');
+            Route::post('anomalies/{anomaly}/review', [AdminAnomalyController::class, 'review'])->name('anomalies.review');
+            Route::get('punch-events', [AdminAnomalyController::class, 'events'])->name('punch-events.index');
         });
     });
 

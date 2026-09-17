@@ -225,6 +225,20 @@ class Employee extends Model
         return $this->hasMany(TimeEntry::class);
     }
 
+    /**
+     * Changes to this employee's recorded time.
+     *
+     * On the employee rather than reached through time_entries, because a correction for
+     * an ADDED punch has no entry when it is raised — and the audit view has to show it
+     * either way.
+     *
+     * @return HasMany<AttendanceCorrection, $this>
+     */
+    public function corrections(): HasMany
+    {
+        return $this->hasMany(AttendanceCorrection::class);
+    }
+
     /** @return HasMany<Shift, $this> */
     public function shifts(): HasMany
     {

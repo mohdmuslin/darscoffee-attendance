@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\Api\V1\Punch;
 
+use App\Enums\PunchEventType;
 use App\Http\Controllers\Controller;
+use App\Models\PunchEvent;
 use App\Models\PunchSession;
 use App\Services\PhotoService;
 use App\Services\PunchService;
@@ -151,6 +153,20 @@ class PunchController extends Controller
          * them leaves nothing to settle a dispute with — which is the whole point.
          */
         if ($session->outlet->requires_photo && $photoBytes === null) {
+            /*
+             * Recorded as well as refused. "I took a photo and it wouldn't let me clock
+             * in" is a real complaint, and without a trail row the only evidence is the
+             * employee's word against a screen nobody kept.
+             */
+            PunchEvent::record(
+                PunchEventType::REJECTED,
+                employeeId: $session->employee_id,
+                outletId: $session->outlet_id,
+                tokenId: $session->outlet_token_id,
+                ipAddress: $request->ip(),
+                meta: ['action' => $validated['action'], 'reason' => 'photo_required'],
+            );
+
             return ApiResponse::error(
                 'This outlet needs a photo with every punch. Allow camera access and try again.',
                 null,
@@ -165,6 +181,25 @@ class PunchController extends Controller
             'end_break' => $this->punch->endBreak($session, $photoBytes, $extension),
             'clock_out' => $this->punch->clockOut($session, $photoBytes, $extension),
         };
+
+        /*
+         * Every successful action is trailed, so "the system lost my clock-out" can be
+         * answered with the moment it was recorded, from which device, against which
+         * code.
+         */
+        PunchEvent::record(
+            PunchEventType::forAction($validated['action']),
+            employeeId: $session->employee_id,
+            outletId: $session->outlet_id,
+            tokenId: $session->outlet_token_id,
+            timeEntryId: $entry?->id,
+            ipAddress: $request->ip(),
+            userAgent: $request->userAgent(),
+            meta: [
+                'device' => $session->device,
+                'photo' => $photoBytes !== null,
+            ],
+        );
 
         return ApiResponse::success([
             'state' => $this->state->for($session->fresh(['employee', 'outlet'])),
