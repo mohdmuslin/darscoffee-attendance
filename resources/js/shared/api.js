@@ -47,18 +47,26 @@ export function setPunchSession(token) {
  *
  * The API returns a consistent envelope, so the useful text is at
  * `response.data.message` and is what should reach the user.
+ *
+ * `fieldErrors` is also attached when the server returned a 422. Without it a form
+ * could only show a summary message, and the per-field errors the validation layer
+ * already produced would be invisible — which is exactly the information someone
+ * filling in the form needs.
  */
 http.interceptors.response.use(
     (response) => response,
     (error) => {
-        const message = error.response?.data?.message
-            ?? error.response?.data?.errors?.error?.[0]
+        const data = error.response?.data ?? {};
+
+        const message = data.message
+            ?? data.errors?.error?.[0]
             ?? error.message
             ?? 'Something went wrong.';
 
         const wrapped = new Error(message);
         wrapped.status = error.response?.status;
-        wrapped.code = error.response?.data?.code;
+        wrapped.code = data.code;
+        wrapped.fieldErrors = data.errors ?? null;
 
         return Promise.reject(wrapped);
     },

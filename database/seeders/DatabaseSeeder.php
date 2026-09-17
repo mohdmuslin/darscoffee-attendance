@@ -21,7 +21,10 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             OutletSeeder::class,
+            // The owner owns every outlet and needs no mapping.
             OwnerSeeder::class,
+            // Siti Fatimah, mapped to all outlets for now. See ManagerSeeder.
+            ManagerSeeder::class,
         ]);
     }
 }
