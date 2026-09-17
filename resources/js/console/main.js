@@ -75,6 +75,15 @@ const routes = [
         component: () => import('./views/VarianceView.vue'),
     },
     {
+        /*
+         * Phase 6. Deliberately the last item before Accounts, because it is the one screen that
+         * turns hours into money — and the one a mistake in is hardest to undo.
+         */
+        path: '/pay',
+        name: 'pay',
+        component: () => import('./views/PayView.vue'),
+    },
+    {
         path: '/accounts',
         name: 'accounts',
         component: () => import('./views/AccountsView.vue'),

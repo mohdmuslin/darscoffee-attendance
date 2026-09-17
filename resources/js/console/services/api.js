@@ -379,6 +379,107 @@ export const varianceApi = {
     },
 };
 
+/**
+ * Pay rates and adhoc adjustments.
+ *
+ * A manager may set rates for their own staff with no owner approval, so what keeps that safe is
+ * the record rather than a permission: every call here sends a reason, and the history endpoint
+ * returns every version so "what was he paid in March?" stays answerable.
+ */
+export const rateApi = {
+    async list(params = {}) {
+        const { data } = await http.get('/admin/rates', { params });
+
+        return data.data;
+    },
+
+    async history(employeeId) {
+        const { data } = await http.get(`/admin/rates/employees/${employeeId}`);
+
+        return data.data;
+    },
+
+    /** Sets a NEW rate row from a date. Never an edit — see StoreCompensationRequest. */
+    async set(employeeId, payload) {
+        const { data } = await http.post(`/admin/rates/employees/${employeeId}`, payload);
+
+        return data.data;
+    },
+
+    async adjust(payload) {
+        const { data } = await http.post('/admin/rates/adjustments', payload);
+
+        return { ...data.data, message: data.message, awaiting_approval: (data.message ?? '').includes('waiting') };
+    },
+
+    async approveAdjustment(id) {
+        const { data } = await http.post(`/admin/rates/adjustments/${id}/approve`);
+
+        return data.data;
+    },
+};
+
+/**
+ * Pay, and pay periods.
+ *
+ * Amounts are DECIMALS from the server, already rounded once per employee. The console displays
+ * them and never recomputes: a second implementation of the arithmetic is a second answer.
+ */
+export const payApi = {
+    async summary(params = {}) {
+        const { data } = await http.get('/admin/pay/summary', { params });
+
+        return data.data;
+    },
+
+    async forEmployee(id, params = {}) {
+        const { data } = await http.get(`/admin/pay/employees/${id}`, { params });
+
+        return data.data.pay;
+    },
+
+    /** Fetched as a blob, because the endpoint needs a bearer token an <a> cannot send. */
+    async downloadCsv(params = {}) {
+        const response = await http.get('/admin/pay/export', { params, responseType: 'blob' });
+
+        const url = URL.createObjectURL(response.data);
+        const link = document.createElement('a');
+
+        link.href = url;
+        link.download = filenameFrom(response.headers['content-disposition'])
+            ?? `pay-${params.from ?? 'export'}.csv`;
+
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    },
+
+    async periods() {
+        const { data } = await http.get('/admin/pay-periods');
+
+        return data.data;
+    },
+
+    async createPeriod(payload) {
+        const { data } = await http.post('/admin/pay-periods', payload);
+
+        return data.data.period;
+    },
+
+    async lockPeriod(id) {
+        const { data } = await http.post(`/admin/pay-periods/${id}/lock`);
+
+        return data.data.period;
+    },
+
+    async reconcilePeriod(id) {
+        const { data } = await http.get(`/admin/pay-periods/${id}/reconcile`);
+
+        return data.data;
+    },
+};
+
 export const anomalyApi = {    async list(params = {}) {
         const { data } = await http.get('/admin/anomalies', { params });
 

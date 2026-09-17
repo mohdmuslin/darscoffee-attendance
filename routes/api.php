@@ -4,6 +4,8 @@ use App\Http\Controllers\Api\V1\Admin\AdminAnomalyController;
 use App\Http\Controllers\Api\V1\Admin\AdminCorrectionController;
 use App\Http\Controllers\Api\V1\Admin\AdminEmployeeController;
 use App\Http\Controllers\Api\V1\Admin\AdminOutletController;
+use App\Http\Controllers\Api\V1\Admin\AdminPayController;
+use App\Http\Controllers\Api\V1\Admin\AdminRateController;
 use App\Http\Controllers\Api\V1\Admin\AdminShiftController;
 use App\Http\Controllers\Api\V1\Admin\AdminTimesheetController;
 use App\Http\Controllers\Api\V1\Admin\AdminUserController;
@@ -96,6 +98,41 @@ Route::prefix('v1')->group(function () {
             Route::patch('users/{user}', [AdminUserController::class, 'update'])->name('users.update');
             Route::post('users/{user}/deactivate', [AdminUserController::class, 'deactivate'])->name('users.deactivate');
             Route::post('users/{user}/activate', [AdminUserController::class, 'activate'])->name('users.activate');
+
+            /*
+             * ---- Pay rates --------------------------------------------
+             *
+             * A manager may set rates for their own staff with NO owner approval (blueprint
+             * §10.2). What keeps that safe is not a permission but the record: every change
+             * stores who made it, when, why, and what it was before.
+             */
+            Route::get('rates', [AdminRateController::class, 'index'])->name('rates.index');
+            Route::post('rates/adjustments', [AdminRateController::class, 'storeAdjustment'])->name('rates.adjustments.store');
+            Route::get('rates/employees/{employee}', [AdminRateController::class, 'history'])->name('rates.history');
+            Route::post('rates/employees/{employee}', [AdminRateController::class, 'store'])->name('rates.store');
+            Route::post('rates/adjustments/{adjustment}/approve', [AdminRateController::class, 'approveAdjustment'])->name('rates.adjustments.approve');
+
+            /*
+             * ---- Pay and pay periods ----------------------------------
+             *
+             * The lock is what turns a computed figure into a committed one: without it, "last
+             * month's total" changes every time somebody fixes a forgotten clock-out, and a
+             * payslip already handed out stops matching the system.
+             *
+             * It is a DETECTABLE freeze rather than a hard one. Corrections stay possible, and
+             * the drift is reported instead of being prevented.
+             */
+            Route::get('pay/summary', [AdminPayController::class, 'summary'])->name('pay.summary');
+            // Declared before the {employee} route so "export" is not read as an id.
+            Route::get('pay/export', [AdminPayController::class, 'export'])->name('pay.export');
+            Route::get('pay/employees/{employee}', [AdminPayController::class, 'employee'])->name('pay.employee');
+
+            Route::get('pay-periods', [AdminPayController::class, 'periods'])->name('pay-periods.index');
+            Route::post('pay-periods', [AdminPayController::class, 'storePeriod'])->name('pay-periods.store');
+            // Locking commits figures, so it is owner-only — a manager locking their own
+            // outlet's payroll is not a power worth handing out.
+            Route::post('pay-periods/{period}/lock', [AdminPayController::class, 'lockPeriod'])->name('pay-periods.lock');
+            Route::get('pay-periods/{period}/reconcile', [AdminPayController::class, 'reconcilePeriod'])->name('pay-periods.reconcile');
 
             /*
              * ---- Shifts (the roster) ----------------------------------
