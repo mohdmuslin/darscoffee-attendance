@@ -17,14 +17,35 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 ])]
 class Outlet extends Model
 {
+    /**
+     * In-memory defaults for columns the database also defaults.
+     *
+     * `create()` only populates attributes that were passed, so a newly created outlet
+     * would have `token_mode` as NULL in memory even though the column defaults to
+     * 'rotating'. Anything that immediately used it — issuing a first punch code, for
+     * instance — would then fail with "Attempt to read property value on null" on a
+     * record that is perfectly valid in the database.
+     *
+     * `timezone` belongs here for the same reason, and it is the more dangerous of the
+     * two: every business date is derived by converting a UTC instant into the outlet's
+     * timezone, so a NULL timezone is a crash at best and a wrong day's hours at worst.
+     */
+    protected $attributes = [
+        'timezone' => 'Asia/Kuala_Lumpur',
+        'token_mode' => 'rotating',
+        'qr_ttl_seconds' => 90,
+        'requires_photo' => true,
+        'is_active' => true,
+    ];
+
     protected function casts(): array
     {
         return [
             /*
-             * Cast so `token_mode` is the enum everywhere, not a bare string.
-             * Without this, `$outlet->token_mode->expires()` fails at runtime —
-             * and a seeder that stores the enum's value silently produces a string
-             * that looks correct in the database.
+             * Cast so `token_mode` is the enum everywhere, not a bare string. Without
+             * this, `$outlet->token_mode->expires()` fails at runtime — and a seeder
+             * storing the enum's value silently produces a string that looks correct in
+             * the database.
              */
             'token_mode' => OutletTokenMode::class,
             'qr_ttl_seconds' => 'integer',

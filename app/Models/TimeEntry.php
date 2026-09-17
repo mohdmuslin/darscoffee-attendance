@@ -122,6 +122,17 @@ class TimeEntry extends Model
 
     public function scopeForBusinessDate(Builder $query, string $date): Builder
     {
-        return $query->where('business_date', $date);
+        /*
+         * whereDate, NOT where.
+         *
+         * The `date` cast makes `business_date` a Carbon, which is convenient for
+         * grouping, but Laravel formats a Carbon using the model's $dateFormat
+         * ('Y-m-d H:i:s') when binding it. MySQL's DATE column silently truncates that
+         * to the day, so `where('business_date', '2026-09-18')` appears to work —
+         * while SQLite stores the full datetime string and never matches. Every
+         * business-day query would therefore return nothing under SQLite and pass on
+         * MySQL, which is the worst possible split: the tests would be lying.
+         */
+        return $query->whereDate('business_date', $date);
     }
 }

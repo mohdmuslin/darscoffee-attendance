@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\Admin\AdminOutletController;
 use App\Http\Controllers\Api\V1\Admin\AdminUserController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\PhotoController;
+use App\Http\Controllers\Api\V1\Punch\PunchController;
 use App\Http\Middleware\EnsureUserIsActive;
 use Illuminate\Support\Facades\Route;
 
@@ -94,10 +95,22 @@ Route::prefix('v1')->group(function () {
     });
 
     /*
-     * The punch flow is public by design. It is authorised by an outlet code plus
-     * an employee PIN, exchanged for a short-lived punch session — see Phase 2.
+     * The punch flow is public by design. It is authorised by an outlet code plus an
+     * employee PIN, exchanged for a short-lived punch session.
+     *
+     * No login: kitchen crew have no account, and requiring one would mean they cannot
+     * clock in at all. Rate-limited because the PIN is a short numeric secret.
      */
     Route::prefix('punch')->name('punch.')->group(function () {
-        //
+        Route::post('start', [PunchController::class, 'start'])
+            // 20/minute per IP. PIN lockout is per-employee and would not slow
+            // someone walking through a list of outlet codes.
+            ->middleware('throttle:20,1')
+            ->name('start');
+
+        // Everything below needs the session issued by /start.
+        Route::get('state', [PunchController::class, 'state'])->name('state');
+        Route::post('act', [PunchController::class, 'act'])->name('act');
+        Route::get('hours', [PunchController::class, 'myHours'])->name('hours');
     });
 });

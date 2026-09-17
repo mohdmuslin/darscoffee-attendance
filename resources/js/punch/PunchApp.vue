@@ -1,27 +1,62 @@
 <script setup>
-import { ref } from 'vue';
+import { onMounted, ref } from 'vue';
+import { usePunchStore } from './stores/punch';
+import ScanStep from './components/ScanStep.vue';
+import PinStep from './components/PinStep.vue';
+import ActionStep from './components/ActionStep.vue';
+import MyHours from './components/MyHours.vue';
 
-/**
- * Root of the punch PWA.
- *
- * Phase 1 shows the shell and confirms the app is wired up. The scan → PIN →
- * photo flow lands in Phase 2; keeping a visible placeholder here means the build
- * can be verified on a real phone before that flow exists, rather than debugging a
- * blank screen later.
- */
-const ready = ref(true);
+const punch = usePunchStore();
+
+const showHours = ref(false);
+const scannedToken = ref(null);
+
+onMounted(async () => {
+    /*
+     * Try to recover a session before showing the scanner. A phone that locked
+     * mid-shift should return to the action screen, not to "scan the code again" when
+     * the employee only wanted to end a break.
+     */
+    await punch.resume();
+});
+
+function onScanned(token) {
+    scannedToken.value = token;
+    punch.step = 'pin';
+}
+
+function onPinBack() {
+    scannedToken.value = null;
+    punch.step = 'scan';
+}
 </script>
 
 <template>
-    <main class="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center px-6 py-10">
-        <div class="w-full rounded-2xl border border-stone-200 bg-white p-8 text-center shadow-sm">
-            <h1 class="text-xl font-semibold text-stone-900">Dars Coffee</h1>
-            <p class="mt-1 text-sm text-stone-500">Staff clock-in</p>
+    <main class="mx-auto flex min-h-dvh max-w-md flex-col px-4 py-6">
+        <header class="mb-6 text-center">
+            <p class="text-lg font-semibold text-stone-900">Dars Coffee</p>
+            <p class="text-xs text-stone-500">Staff clock-in</p>
+        </header>
 
-            <p v-if="ready" class="mt-6 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                The clock-in flow is being built. Phase 1 is the foundation: outlets,
-                employees and codes.
-            </p>
-        </div>
+        <p v-if="punch.error" class="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+            {{ punch.error }}
+        </p>
+
+        <!--
+            The steps are a linear sequence rather than routes. The flow is short, and
+            URL states would need guarding without making the screen any easier to use
+            one-handed in a kitchen.
+        -->
+        <ScanStep v-if="punch.step === 'scan'" @scanned="onScanned" />
+
+        <PinStep
+            v-else-if="punch.step === 'pin'"
+            :token="scannedToken"
+            @back="onPinBack"
+        />
+
+        <ActionStep v-else @show-hours="showHours = true" />
+
+        <MyHours v-if="showHours" @close="showHours = false" />
     </main>
 </template>

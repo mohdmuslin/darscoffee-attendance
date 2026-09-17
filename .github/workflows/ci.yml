@@ -9,6 +9,21 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    # The suite runs twice, once per driver, so it needs a real MySQL to hand.
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: dars_attendance
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -ppassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -45,12 +60,29 @@ jobs:
           npm ci
           npm run build
 
-      # The test suite runs on SQLite in-memory for speed. The one-open-segment
-      # invariant is implemented differently per driver (partial unique index on
-      # SQLite, generated column on MySQL) and the two were verified to behave
-      # identically, so SQLite genuinely proves the behaviour rather than
-      # approximating it.
-      - name: Run tests
+      # The suite runs on SQLite for speed, but that is NOT sufficient on its own.
+      #
+      # A date-cast column is a real example of the two drivers disagreeing: Laravel
+      # binds `business_date` as 'Y-m-d H:i:s', MySQL's DATE column truncates that to
+      # the day so the query works, and SQLite stores the full string so the query
+      # matched nothing. Every business-day query returned empty on SQLite and passed
+      # on MySQL — the tests looked green while the screen showed 0m worked.
+      #
+      # So the full suite runs on MySQL too. Anything touching a date, a unique index
+      # or a generated column is only genuinely proven here.
+      - name: Run tests on SQLite
+        run: php vendor/bin/pest --compact
+
+      - name: Point the environment at MySQL
+        run: |
+          sed -i 's/^DB_CONNECTION=.*/DB_CONNECTION=mysql/' .env
+          sed -i 's/^# DB_HOST=.*/DB_HOST=127.0.0.1/' .env
+          sed -i 's/^# DB_PORT=.*/DB_PORT=3306/' .env
+          sed -i 's/^# DB_DATABASE=.*/DB_DATABASE=dars_attendance/' .env
+          sed -i 's/^# DB_USERNAME=.*/DB_USERNAME=root/' .env
+          sed -i 's/^# DB_PASSWORD=.*/DB_PASSWORD=password/' .env
+
+      - name: Run tests on MySQL
         run: php vendor/bin/pest --compact
 
       - name: Check code style
