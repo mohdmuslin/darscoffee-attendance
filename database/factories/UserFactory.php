@@ -54,12 +54,16 @@ class UserFactory extends Factory
     /**
      * A manager mapped to the given outlets.
      *
-     * Without a mapping a manager sees nothing, so this is what makes a manager
-     * fixture actually able to see anything.
+     * Without a mapping a manager sees nothing (the scope fails closed), so this is
+     * what makes a manager fixture actually able to see anything.
+     *
+     * Uses `afterCreating`, not `after` — the shorter name is not available on this
+     * framework version, and the failure ("Call to undefined method ...::after()")
+     * points at the factory rather than at the framework version.
      */
     public function forOutlets(Outlet ...$outlets): static
     {
-        return $this->manager()->after(
+        return $this->manager()->afterCreating(
             fn (User $user) => $user->outlets()->sync(collect($outlets)->pluck('id')->all())
         );
     }

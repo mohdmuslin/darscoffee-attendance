@@ -64,9 +64,10 @@ it('returns 401 for an unauthenticated API call rather than a 500', function () 
      * no such route, so the framework raises "Route [login] not defined" and the
      * client sees an HTTP 500 for what is simply an expired token.
      *
-     * That misdiagnosis cost hours on the ordering system, so it is pinned here.
+     * That misdiagnosis cost hours on the ordering system, so it is pinned here
+     * against a real authenticated endpoint.
      */
-    $this->get('/api/user')
+    $this->get('/api/v1/auth/me')
         ->assertStatus(401)
         ->assertJsonPath('message', 'Unauthenticated.');
 });

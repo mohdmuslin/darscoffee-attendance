@@ -23,3 +23,31 @@ uses(
  * belongs in Feature, where RefreshDatabase keeps tests isolated.
  */
 uses(TestCase::class)->in('Unit');
+
+/**
+ * Simulate a fresh HTTP request within a feature test.
+ *
+ * WHY THIS IS NEEDED
+ *
+ * A feature test reuses ONE application instance across every `$this->get()` call.
+ * The auth guard resolves the token's user once and then holds it, so a second
+ * request in the same test still sees the FIRST request's user — even after the
+ * account has been deactivated or the token revoked.
+ *
+ * That is purely a harness artifact. In production each HTTP request is a fresh
+ * process, so nothing is cached and the middleware sees current state. The
+ * distinction matters: without this helper, a test asserting "a deactivated account
+ * is refused" fails even though production behaviour is correct — and the tempting
+ * "fix" is to weaken the check rather than the test.
+ *
+ * Call it between requests whenever a test changes authentication state that a
+ * LATER request must observe.
+ */
+function freshRequest(): void
+{
+    /*
+     * `app()` resolves the container from the current test case rather than
+     * reaching for its protected `$app` property, which is not accessible here.
+     */
+    app('auth')->forgetGuards();
+}
