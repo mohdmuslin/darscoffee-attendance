@@ -16,6 +16,7 @@ const isLogin = computed(() => route.meta.public === true);
  */
 const links = computed(() => [
     { name: 'dashboard', label: 'Dashboard', show: true },
+    { name: 'roster', label: 'Roster', show: auth.canAdminister },
     { name: 'timesheets', label: 'Timesheets', show: auth.canAdminister },
     { name: 'employees', label: 'Employees', show: auth.canAdminister },
     { name: 'outlets', label: 'Outlets & codes', show: auth.canAdminister },

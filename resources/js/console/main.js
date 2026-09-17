@@ -54,6 +54,16 @@ const routes = [
         props: true,
     },
     {
+        /*
+         * Phase 4. The roster sits next to Timesheets in the navigation because the two are
+         * read together: one is the plan, the other is what happened. Putting the roster
+         * behind a "scheduling" menu would hide the pairing that makes both useful.
+         */
+        path: '/roster',
+        name: 'roster',
+        component: () => import('./views/RosterView.vue'),
+    },
+    {
         path: '/accounts',
         name: 'accounts',
         component: () => import('./views/AccountsView.vue'),

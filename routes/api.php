@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\Admin\AdminAnomalyController;
 use App\Http\Controllers\Api\V1\Admin\AdminCorrectionController;
 use App\Http\Controllers\Api\V1\Admin\AdminEmployeeController;
 use App\Http\Controllers\Api\V1\Admin\AdminOutletController;
+use App\Http\Controllers\Api\V1\Admin\AdminShiftController;
 use App\Http\Controllers\Api\V1\Admin\AdminTimesheetController;
 use App\Http\Controllers\Api\V1\Admin\AdminUserController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
@@ -94,6 +95,24 @@ Route::prefix('v1')->group(function () {
             Route::patch('users/{user}', [AdminUserController::class, 'update'])->name('users.update');
             Route::post('users/{user}/deactivate', [AdminUserController::class, 'deactivate'])->name('users.deactivate');
             Route::post('users/{user}/activate', [AdminUserController::class, 'activate'])->name('users.activate');
+
+            /*
+             * ---- Shifts (the roster) ----------------------------------
+             *
+             * The PLAN, kept apart from `time_entries`, which is the ACTUAL. Nothing here
+             * writes an entry: a roster change must never alter recorded hours.
+             *
+             * There is deliberately no destroy route. Cancelling keeps the row, because a
+             * shift that was rostered and then called off is what explains a no-show.
+             */
+            Route::get('shifts', [AdminShiftController::class, 'index'])->name('shifts.index');
+            Route::get('shifts/current', [AdminShiftController::class, 'current'])->name('shifts.current');
+            Route::post('shifts', [AdminShiftController::class, 'store'])->name('shifts.store');
+            // Declared before the {shift} route so "copy" is not read as an id.
+            Route::post('shifts/copy', [AdminShiftController::class, 'copy'])->name('shifts.copy');
+            Route::get('shifts/{shift}', [AdminShiftController::class, 'show'])->name('shifts.show');
+            Route::patch('shifts/{shift}', [AdminShiftController::class, 'update'])->name('shifts.update');
+            Route::post('shifts/{shift}/cancel', [AdminShiftController::class, 'cancel'])->name('shifts.cancel');
 
             /*
              * ---- Timesheets -------------------------------------------

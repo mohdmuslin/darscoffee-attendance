@@ -280,8 +280,66 @@ export const correctionApi = {
     },
 };
 
-export const anomalyApi = {
+/**
+ * The roster — the PLAN, kept apart from time entries, which are the ACTUAL.
+ *
+ * There is deliberately no delete method. Cancelling keeps the row, because a shift that
+ * was rostered and then called off is what explains a no-show.
+ */
+export const shiftApi = {
     async list(params = {}) {
+        const { data } = await http.get('/admin/shifts', { params });
+
+        return data.data;
+    },
+
+    /** This week and next, for the roster landing view. */
+    async current(params = {}) {
+        const { data } = await http.get('/admin/shifts/current', { params });
+
+        return data.data;
+    },
+
+    async get(id) {
+        const { data } = await http.get(`/admin/shifts/${id}`);
+
+        return data.data.shift;
+    },
+
+    /**
+     * Create or amend.
+     *
+     * Times go as local wall-clock strings ('2026-09-21T09:00'), never with an offset. The
+     * server attaches the outlet's timezone; sending an offset would mean trusting the
+     * phone's clock and its timezone setting, and the failure mode is a shift eight hours
+     * out with every lateness figure following it.
+     */
+    async create(payload) {
+        const { data } = await http.post('/admin/shifts', payload);
+
+        return data.data.shift;
+    },
+
+    async update(id, payload) {
+        const { data } = await http.patch(`/admin/shifts/${id}`, payload);
+
+        return data.data.shift;
+    },
+
+    async cancel(id, reason = null) {
+        const { data } = await http.post(`/admin/shifts/${id}/cancel`, { reason });
+
+        return data.data.shift;
+    },
+
+    async copy(payload) {
+        const { data } = await http.post('/admin/shifts/copy', payload);
+
+        return data.data;
+    },
+};
+
+export const anomalyApi = {    async list(params = {}) {
         const { data } = await http.get('/admin/anomalies', { params });
 
         return data.data;

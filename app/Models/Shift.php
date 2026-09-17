@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\ScopesToOutlets;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -25,6 +26,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 ])]
 class Shift extends Model
 {
+    /*
+     * Scoped by outlet, like every other listing in the console. A manager must not be
+     * able to read — or cancel — a shift rostered at another outlet, and `outlet_id` is a
+     * plain column here, so the default scope applies with no override.
+     */
+    use ScopesToOutlets;
+
     protected function casts(): array
     {
         return [
@@ -91,5 +99,44 @@ class Shift extends Model
     public function scopeActive(Builder $query): Builder
     {
         return $query->whereNull('cancelled_at');
+    }
+
+    public function scopeCancelled(Builder $query): Builder
+    {
+        return $query->whereNotNull('cancelled_at');
+    }
+
+    /**
+     * Shifts that START on a given local date at an outlet.
+     *
+     * Range-bounded rather than using whereDate on the shifted value: `starts_at` is stored
+     * UTC, so the local day boundary has to be computed in the outlet's own timezone and
+     * passed in as an instant pair. A date comparison on the UTC column would put an
+     * evening shift on the wrong day — the same class of mistake the business-day rule
+     * exists to avoid.
+     */
+    public function scopeStartingBetween(Builder $query, \DateTimeInterface $from, \DateTimeInterface $to): Builder
+    {
+        return $query->where('starts_at', '>=', $from)->where('starts_at', '<', $to);
+    }
+
+    /** Cancel rather than delete: a called-off shift explains a no-show. */
+    public function cancel(): void
+    {
+        if (! $this->isCancelled()) {
+            $this->forceFill(['cancelled_at' => now()])->save();
+        }
+    }
+
+    /** Whether this shift overlaps another, used to catch a double-booking. */
+    public function overlaps(\DateTimeInterface $startsAt, \DateTimeInterface $endsAt): bool
+    {
+        return $this->starts_at < $endsAt && $this->ends_at > $startsAt;
+    }
+
+    /** The shift's own outlet timezone, falling back to the business default. */
+    public function timezone(): string
+    {
+        return $this->outlet?->timezone ?? config('attendance.business_timezone');
     }
 }
