@@ -33,10 +33,20 @@ class Outlet extends Model
         ];
     }
 
-    /** @return HasMany<Employee, $this> */
-    public function employees(): HasMany
+    /**
+     * Employees who work at this outlet.
+     *
+     * Many-to-many through `employee_outlet`, NOT a `hasMany`. Staff cover between
+     * outlets, so there is no `employees.outlet_id` column — and assuming one gives
+     * a confusing SQL error ("no such column: employees.outlet_id") the moment
+     * anything calls `withCount('employees')`.
+     *
+     * @return BelongsToMany<Employee, $this>
+     */
+    public function employees(): BelongsToMany
     {
-        return $this->hasMany(Employee::class);
+        return $this->belongsToMany(Employee::class, 'employee_outlet')
+            ->withPivot('is_primary');
     }
 
     /** Console users who may see this outlet. */

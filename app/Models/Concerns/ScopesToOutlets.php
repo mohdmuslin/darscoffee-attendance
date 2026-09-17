@@ -82,6 +82,12 @@ trait ScopesToOutlets
      * Whether a single record is within a user's scope.
      *
      * Used for show/update routes, where a query filter is not enough.
+     *
+     * Models whose outlet comes from a relation rather than a column — Employee,
+     * whose outlets are a pivot — MUST override this, because the default compares
+     * a single `outlet_id` that such a model does not have. An override that forgets
+     * to would deny everything rather than leak, which is the safer direction but
+     * still wrong.
      */
     public function isVisibleTo(?User $user): bool
     {
@@ -91,8 +97,13 @@ trait ScopesToOutlets
 
         $outletIds = $user->visibleOutletIds();
 
+        // null means an owner: unrestricted.
         if ($outletIds === null) {
             return true;
+        }
+
+        if ($outletIds === []) {
+            return false;
         }
 
         return in_array($this->outletScopeOutletId(), $outletIds, true);
