@@ -58,6 +58,18 @@ class Setting extends Model
      */
     public const REQUIRE_CORRECTION_APPROVAL = 'require_correction_approval';
 
+    /**
+     * Slack, in minutes, when deciding whether a punch covered a rostered shift.
+     *
+     * Used by VarianceService for two things: whether a punch overlaps a shift at all, and
+     * whether the hours worked are close enough that the shift counts as met rather than
+     * short or over.
+     *
+     * 30 minutes by default. Tightening it would report every ordinary late arrival as a
+     * variance, and a report that flags everything teaches managers to ignore it.
+     */
+    public const VARIANCE_TOLERANCE_MINUTES = 'variance_tolerance_minutes';
+
     public static function get(string $key, mixed $default = null): mixed
     {
         return static::query()->where('key', $key)->value('value') ?? $default;

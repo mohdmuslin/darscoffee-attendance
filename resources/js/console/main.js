@@ -64,6 +64,17 @@ const routes = [
         component: () => import('./views/RosterView.vue'),
     },
     {
+        /*
+         * Phase 5. Sits directly after Timesheets because it is the same question asked the
+         * other way round: the timesheet says what was worked, this says how that compares to
+         * what was agreed. Reading one without the other is how an outlet quietly opens on a
+         * day it said it was closed.
+         */
+        path: '/variance',
+        name: 'variance',
+        component: () => import('./views/VarianceView.vue'),
+    },
+    {
         path: '/accounts',
         name: 'accounts',
         component: () => import('./views/AccountsView.vue'),

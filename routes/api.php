@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\Admin\AdminOutletController;
 use App\Http\Controllers\Api\V1\Admin\AdminShiftController;
 use App\Http\Controllers\Api\V1\Admin\AdminTimesheetController;
 use App\Http\Controllers\Api\V1\Admin\AdminUserController;
+use App\Http\Controllers\Api\V1\Admin\AdminVarianceController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\PhotoController;
 use App\Http\Controllers\Api\V1\Punch\PunchController;
@@ -113,6 +114,17 @@ Route::prefix('v1')->group(function () {
             Route::get('shifts/{shift}', [AdminShiftController::class, 'show'])->name('shifts.show');
             Route::patch('shifts/{shift}', [AdminShiftController::class, 'update'])->name('shifts.update');
             Route::post('shifts/{shift}/cancel', [AdminShiftController::class, 'cancel'])->name('shifts.cancel');
+
+            /*
+             * ---- Planned versus actual --------------------------------
+             *
+             * Read only. A variance report that could alter a shift or a time entry would be
+             * reporting on figures it had just changed.
+             */
+            Route::get('variance/summary', [AdminVarianceController::class, 'summary'])->name('variance.summary');
+            // Declared before the {employee} route so "export" is not read as an id.
+            Route::get('variance/export', [AdminVarianceController::class, 'export'])->name('variance.export');
+            Route::get('variance/employees/{employee}', [AdminVarianceController::class, 'employee'])->name('variance.employee');
 
             /*
              * ---- Timesheets -------------------------------------------

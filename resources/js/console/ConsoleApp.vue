@@ -18,6 +18,7 @@ const links = computed(() => [
     { name: 'dashboard', label: 'Dashboard', show: true },
     { name: 'roster', label: 'Roster', show: auth.canAdminister },
     { name: 'timesheets', label: 'Timesheets', show: auth.canAdminister },
+    { name: 'variance', label: 'Planned vs actual', show: auth.canAdminister },
     { name: 'employees', label: 'Employees', show: auth.canAdminister },
     { name: 'outlets', label: 'Outlets & codes', show: auth.canAdminister },
     { name: 'anomalies', label: 'Anomalies', show: auth.canAdminister },

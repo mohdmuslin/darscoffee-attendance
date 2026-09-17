@@ -339,6 +339,46 @@ export const shiftApi = {
     },
 };
 
+/**
+ * Planned versus actual.
+ *
+ * Read only, deliberately: a variance report that could alter a shift or a time entry would
+ * be reporting on figures it had just changed.
+ */
+export const varianceApi = {
+    async summary(params = {}) {
+        const { data } = await http.get('/admin/variance/summary', { params });
+
+        return data.data;
+    },
+
+    async forEmployee(id, params = {}) {
+        const { data } = await http.get(`/admin/variance/employees/${id}`, { params });
+
+        return data.data.variance;
+    },
+
+    /** Fetched as a blob, because the endpoint is behind a bearer token and an <a> cannot send one. */
+    async downloadCsv(params = {}) {
+        const response = await http.get('/admin/variance/export', {
+            params,
+            responseType: 'blob',
+        });
+
+        const url = URL.createObjectURL(response.data);
+        const link = document.createElement('a');
+
+        link.href = url;
+        link.download = filenameFrom(response.headers['content-disposition'])
+            ?? `variance-${params.from ?? 'export'}.csv`;
+
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    },
+};
+
 export const anomalyApi = {    async list(params = {}) {
         const { data } = await http.get('/admin/anomalies', { params });
 

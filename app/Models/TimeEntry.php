@@ -79,14 +79,21 @@ class TimeEntry extends Model
      * Derived from the timestamps rather than trusted from the cached column, so a
      * stale cache can never inflate hours. The cached value exists only to make
      * reporting cheaper.
+     *
+     * Clamped at zero. A segment that appears to END BEFORE IT STARTS is data that cannot be
+     * true, and it has two plausible causes: a badly-constructed seed, or a future-dated
+     * clock-in from a device with a wrong clock. Reporting a negative duration in either case
+     * would put "worked -4h 9m" on a timesheet, which reads as a credit and would quietly
+     * reduce someone's hours. Zero is wrong too, but wrong in the safe direction, and the
+     * entry is still visible for a manager to correct.
      */
     public function durationSeconds(): int
     {
         if ($this->ended_at === null) {
-            return (int) $this->started_at->diffInSeconds(now());
+            return max(0, (int) $this->started_at->diffInSeconds(now()));
         }
 
-        return (int) $this->started_at->diffInSeconds($this->ended_at);
+        return max(0, (int) $this->started_at->diffInSeconds($this->ended_at));
     }
 
     /**
