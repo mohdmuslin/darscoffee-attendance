@@ -251,14 +251,36 @@ Cron           php artisan schedule:run   every minute
 Timezone       store UTC, display Asia/Kuala_Lumpur
 ```
 
-**Cron is required**, unlike a purely on-demand system. Scheduled work:
+**Cron is required**, unlike a purely on-demand system. Scheduled work, as actually
+implemented in `routes/console.php`:
 
-| Job | Frequency | Why |
-|---|---|---|
-| Flag entries left open too long | hourly | Someone forgot to clock out |
-| Close/flag abandoned segments | daily | Keeps the open-entry invariant honest |
-| Auto-lock closed pay periods | monthly | Prevents silent edits to finalised months |
-| PDPA retention purge | monthly | Delete photos older than the retention window |
+| Job | Frequency | Command | Why |
+|---|---|---|---|
+| Flag forgotten clock-outs | hourly | `attendance:flag-open-segments` | Someone did not clock out |
+| PDPA retention purge | daily, 03:00 | `attendance:purge-photos` | Delete photographs past the retention window |
+
+Two notes on that table, both of which were wrong in an earlier draft of this document.
+
+**The retention purge is daily, not monthly.** A monthly window means a photograph can
+live for up to ninety days *and a month*, and the extra slack buys nothing. It runs at
+03:00 in the **business** timezone — a bare `dailyAt('03:00')` fires at 11am in Kuala
+Lumpur, deleting photographs while the console is in use.
+
+**The forgotten clock-out check did not exist and now does.** This document listed it as
+running hourly, and it was not implemented at all: `AnomalyType::MISSING_CLOCKOUT` was
+defined and given HIGH severity, but raised nowhere. `PunchService::flagOnClose()` raises
+`LONG_SPAN` only when a segment **closes**, which is exactly the event that never happens
+when someone forgets. The gap was invisible because every surrounding piece looked
+complete. See `docs/hardening.md` for what it costs: a segment left open also blocks that
+employee's next clock-in entirely, because the open-segment invariant permits only one.
+
+**Auto-locking pay periods is deliberately NOT scheduled.** It was listed here as monthly,
+and leaving it out is a decision rather than an oversight: locking commits a figure that
+somebody is paid against. Doing that automatically, at a moment nobody chose, means a
+correction that lands a day late is silently excluded from an already-committed month. The
+owner locks a period when they have looked at it. The lock is detectable either way —
+`pay_periods` stores the approved snapshot **and** a hash of its inputs, so a later change
+is reported as drift rather than showing a new figure as though nothing had happened.
 
 The same deployment constraints as the ordering system apply: **no workers, so no
 queues.** Anything long-running is a cron command, and anything interactive must

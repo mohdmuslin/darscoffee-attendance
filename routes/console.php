@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\FlagForgottenClockOuts;
 use App\Console\Commands\PurgeRetainedPhotos;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -44,4 +45,18 @@ Schedule::command(PurgeRetainedPhotos::class)
      * catches the same files. Chasing a backlog here would just mean deleting data at
      * an unexpected hour.
      */
+    ->onOneServer();
+
+/*
+ * Flag forgotten clock-outs.
+ *
+ * Hourly, not daily, and that difference matters. A segment left open inflates the worked total
+ * AND prevents that employee clocking in again — the open-segment invariant allows only one open
+ * segment each, so the next morning their clock-in silently does nothing. Running hourly means
+ * the flag appears while somebody is still on shift and can be asked, rather than the next day
+ * when the only option left is a manager guessing at the time.
+ */
+Schedule::command(FlagForgottenClockOuts::class)
+    ->hourly()
+    ->withoutOverlapping()
     ->onOneServer();

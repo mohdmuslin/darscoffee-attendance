@@ -369,6 +369,61 @@ not measure:
 
 ---
 
+## 6. Forgotten clock-outs (a check that had never fired)
+
+Not originally part of Phase 7. Found while cross-checking `docs/architecture.md` against
+what was actually scheduled, and it is the most valuable thing this phase turned up.
+
+### The gap
+
+`AnomalyType::MISSING_CLOCKOUT` was **defined, given HIGH severity, and raised nowhere in
+the codebase.** `PunchService::flagOnClose()` raises `LONG_SPAN` — but only when a segment
+**closes**, which is exactly the event that never happens when somebody forgets to clock
+out.
+
+The gap was invisible because every surrounding piece looked complete: the enum case, the
+severity, the label, and the setting (`MISSING_CLOCKOUT_HOURS`) all existed. Nothing
+downstream was obviously missing. A check that can never fire leaves no trace.
+
+### What it costs
+
+Two things, and the second is worse than the first:
+
+1. The segment runs for days. It inflates the worked total and distorts overtime.
+2. **The employee cannot clock in again at all.** The open-segment invariant permits only
+   one open segment per employee, so the next morning they scan the code, enter their PIN,
+   press clock in, and nothing happens — `clockIn()` returns the existing open segment
+   rather than creating a second one. No error is shown. Nobody at the counter can see why.
+
+### The command
+
+`attendance:flag-open-segments`, hourly.
+
+- Threshold from `Setting::MISSING_CLOCKOUT_HOURS`, default 16 hours. Late enough that a
+  long close is not flagged as a mistake, early enough to catch an overnight omission
+  before the next shift starts.
+- **Raised once, not once per run.** The command runs hourly for as long as the mistake
+  stands, and without the deduplication a shift forgotten on Friday would have fifty
+  identical anomalies by Monday — burying every other flag in the review queue, which is
+  the one place a manager looks.
+- The time is rendered in the **business** timezone. A manager checking "what time did they
+  start" needs the wall clock they would have seen; UTC reads 00:00 and looks like a fault
+  in the data rather than a timezone.
+- `--dry-run` and `--hours` overrides.
+- **It does not close the segment.** Closing it would invent an end time, and a fabricated
+  clock-out is worse than a missing one — the whole system exists so that recorded time is
+  trustworthy. The flag exists so a manager can correct the entry, which is auditable and
+  attributable.
+
+### The lesson worth keeping
+
+A documented feature is not an implemented one. The architecture document described this
+job as running hourly, and reading the document was enough to believe it. The check that
+caught it was grepping for the anomaly type the document implied was being raised —
+cross-checking **the claim against the code**, not the code against itself.
+
+---
+
 ## What was decided without being asked
 
 Recorded here so the decisions can be reviewed rather than discovered:
@@ -388,3 +443,8 @@ Recorded here so the decisions can be reviewed rather than discovered:
 6. **The queue is dropped on logout.** Loses punches for someone who logs out with a
    queue pending, but avoids attributing one person's punches to another on a shared
    phone. The warning banner exists so this is a choice, not a surprise.
+7. **Forgotten clock-outs are flagged, never auto-closed.** A fabricated end time is worse
+   than a missing one.
+8. **Pay periods are never auto-locked.** Locking commits a figure somebody is paid
+   against; a correction that lands a day late would then be silently excluded. The owner
+   locks a period when they have looked at it.
