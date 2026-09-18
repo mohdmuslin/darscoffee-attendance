@@ -47,6 +47,26 @@ class EmployeeResource extends JsonResource
             'is_active' => $this->is_active,
 
             'consent_at' => $this->consent_at?->toIso8601String(),
+            'consent_method' => $this->consent_method?->value,
+            'consent_method_label' => $this->consent_method?->label(),
+            'consent_version' => $this->consent_version,
+            'consent_note' => $this->consent_note,
+            'consent_recorded_by' => $this->whenLoaded(
+                'consentRecorder',
+                fn () => $this->consentRecorder?->name,
+            ),
+            'consent_withdrawn_at' => $this->consent_withdrawn_at?->toIso8601String(),
+            'consent_withdrawal_note' => $this->consent_withdrawal_note,
+
+            /*
+             * The three states the console renders differently, resolved server-side so the
+             * client does not re-derive the rules and drift from them. In particular
+             * `has_consent` is false after a withdrawal, which a naive check on
+             * `consent_at !== null` would get wrong.
+             */
+            'has_consent' => $this->hasConsent(),
+            'consent_withdrawn' => $this->hasWithdrawnConsent(),
+            'needs_consent' => $this->needsConsent(),
 
             'outlets' => $this->whenLoaded('outlets', fn () => $this->outlets->map(fn ($outlet) => [
                 'id' => $outlet->id,

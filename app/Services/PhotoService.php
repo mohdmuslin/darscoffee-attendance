@@ -114,9 +114,22 @@ class PhotoService
      *
      * PDPA minimisation, run by cron rather than done by hand — a manual retention
      * process is one that stops happening.
+     *
+     * Age alone is deliberately the only test here, and that makes this a blunt
+     * instrument: it cannot tell a stale photo from one that is live evidence in an
+     * open dispute. `PhotoRetentionService` is what decides which photographs are
+     * eligible and applies the holds; this method is the file deletion it calls. Use
+     * that service rather than reaching for this directly.
+     *
+     * @return int Number of files deleted.
      */
     public function purgeFolderOlderThan(string $folder, int $days): int
     {
+        // A folder that has never been written to is not an error; it is a fresh install.
+        if (! Storage::disk(self::DISK)->exists($folder)) {
+            return 0;
+        }
+
         $cutoff = now()->subDays($days)->getTimestamp();
         $purged = 0;
 

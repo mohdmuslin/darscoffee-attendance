@@ -75,22 +75,35 @@ Route::prefix('v1')->group(function () {
             Route::get('outlets/{outlet}/print-sheet', [AdminOutletController::class, 'printSheet'])->name('outlets.print-sheet');
 
             // ---- Employees --------------------------------------------
+            /*
+             * `{employee}` is constrained to digits throughout, so a word can never be
+             * parsed as an employee id. Without it, a mistyped or hand-crafted URL like
+             * `/employees/consent` matches `employees/{employee}` and fails as a missing
+             * model — which reads as a broken endpoint rather than as a bad id, and makes
+             * route ordering something future edits have to keep getting right.
+             */
             Route::get('employees', [AdminEmployeeController::class, 'index'])->name('employees.index');
             Route::post('employees', [AdminEmployeeController::class, 'store'])->name('employees.store');
-            Route::get('employees/{employee}', [AdminEmployeeController::class, 'show'])->name('employees.show');
-            Route::patch('employees/{employee}', [AdminEmployeeController::class, 'update'])->name('employees.update');
+            Route::get('employees/{employee}', [AdminEmployeeController::class, 'show'])->whereNumber('employee')->name('employees.show');
+            Route::patch('employees/{employee}', [AdminEmployeeController::class, 'update'])->whereNumber('employee')->name('employees.update');
 
             /*
              * Deactivate rather than delete: history must survive someone leaving,
              * and a manager deleting staff ahead of a dispute is not a power worth
              * granting. There is deliberately no destroy route.
              */
-            Route::post('employees/{employee}/deactivate', [AdminEmployeeController::class, 'deactivate'])->name('employees.deactivate');
-            Route::post('employees/{employee}/activate', [AdminEmployeeController::class, 'activate'])->name('employees.activate');
+            Route::post('employees/{employee}/deactivate', [AdminEmployeeController::class, 'deactivate'])->whereNumber('employee')->name('employees.deactivate');
+            Route::post('employees/{employee}/activate', [AdminEmployeeController::class, 'activate'])->whereNumber('employee')->name('employees.activate');
 
-            Route::put('employees/{employee}/pin', [AdminEmployeeController::class, 'setPin'])->name('employees.pin.set');
-            Route::delete('employees/{employee}/pin', [AdminEmployeeController::class, 'clearPin'])->name('employees.pin.clear');
-            Route::post('employees/{employee}/photo', [AdminEmployeeController::class, 'uploadPhoto'])->name('employees.photo');
+            Route::put('employees/{employee}/pin', [AdminEmployeeController::class, 'setPin'])->whereNumber('employee')->name('employees.pin.set');
+            Route::delete('employees/{employee}/pin', [AdminEmployeeController::class, 'clearPin'])->whereNumber('employee')->name('employees.pin.clear');
+            Route::post('employees/{employee}/photo', [AdminEmployeeController::class, 'uploadPhoto'])->whereNumber('employee')->name('employees.photo');
+
+            // ---- PDPA consent -----------------------------------------
+            Route::get('employees/consent/backlog', [AdminEmployeeController::class, 'consentBacklog'])->name('employees.consent.backlog');
+            Route::get('employees/consent/methods', [AdminEmployeeController::class, 'consentMethods'])->name('employees.consent.methods');
+            Route::post('employees/{employee}/consent', [AdminEmployeeController::class, 'recordConsent'])->whereNumber('employee')->name('employees.consent.record');
+            Route::delete('employees/{employee}/consent', [AdminEmployeeController::class, 'withdrawConsent'])->whereNumber('employee')->name('employees.consent.withdraw');
 
             // ---- Console accounts (owner only) -------------------------
             Route::get('users', [AdminUserController::class, 'index'])->name('users.index');

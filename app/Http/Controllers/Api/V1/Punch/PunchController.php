@@ -148,11 +148,17 @@ class PunchController extends Controller
         [$photoBytes, $extension] = $this->decodePhoto($validated['photo'] ?? null);
 
         /*
-         * A photo is required when the outlet asks for one. Enforced here rather than
-         * only warned about, because a punch without a photo at an outlet that requires
-         * them leaves nothing to settle a dispute with — which is the whole point.
+         * A photo is required when the outlet asks for one AND this employee may be
+         * photographed. Enforced here rather than only warned about, because a punch without
+         * a photo at an outlet that requires them leaves nothing to settle a dispute with —
+         * which is the whole point.
+         *
+         * Asked of the EMPLOYEE rather than read off the outlet, so that someone who has
+         * withdrawn consent is never photographed and — just as importantly — is not blocked
+         * from punching either. Their refusal removes the photo requirement for them; it must
+         * not turn into not being able to clock in.
          */
-        if ($session->outlet->requires_photo && $photoBytes === null) {
+        if ($session->employee->isPhotographRequired($session->outlet) && $photoBytes === null) {
             /*
              * Recorded as well as refused. "I took a photo and it wouldn't let me clock
              * in" is a real complaint, and without a trail row the only evidence is the
@@ -173,6 +179,33 @@ class PunchController extends Controller
                 422,
                 'PHOTO_REQUIRED',
             );
+        }
+
+        /*
+         * The mirror case: a photo was taken but this person must not be photographed,
+         * because they withdrew consent. DISCARDED rather than stored, and the punch goes
+         * through — the person still worked.
+         *
+         * Asked of the EMPLOYEE alone (`mayBePhotographed`), not of the outlet. An outlet that
+         * does not require photos still accepts a volunteered one; only a refusal by the
+         * person forbids it.
+         *
+         * This can happen legitimately: the screen was rendered before the withdrawal, or the
+         * browser camera was already open. It is recorded, because a photograph being taken
+         * at all is the event the consent existed to prevent, and the owner should be able to
+         * see it happening rather than have it disappear.
+         */
+        if ($photoBytes !== null && ! $session->employee->mayBePhotographed()) {
+            PunchEvent::record(
+                PunchEventType::REJECTED,
+                employeeId: $session->employee_id,
+                outletId: $session->outlet_id,
+                tokenId: $session->outlet_token_id,
+                ipAddress: $request->ip(),
+                meta: ['action' => $validated['action'], 'reason' => 'consent_withdrawn_photo_discarded'],
+            );
+
+            $photoBytes = null;
         }
 
         $entry = match ($validated['action']) {

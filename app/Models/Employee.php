@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ConsentMethod;
 use App\Enums\PayBasis;
 use App\Models\Concerns\ScopesToOutlets;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -25,6 +26,8 @@ use Illuminate\Support\Facades\Hash;
     'employee_code', 'name', 'phone', 'ic_number', 'pay_basis',
     'user_id', 'joined_at', 'resigned_at', 'is_active',
     'photo_path', 'consent_at', 'consent_note',
+    'consent_recorded_by', 'consent_version', 'consent_method',
+    'consent_withdrawn_at', 'consent_withdrawal_note',
 ])]
 #[Hidden(['pin_hash', 'ic_number'])]
 class Employee extends Model
@@ -203,7 +206,138 @@ class Employee extends Model
             'pin_set_at' => 'datetime',
             'pin_locked_until' => 'datetime',
             'consent_at' => 'datetime',
+            'consent_method' => ConsentMethod::class,
+            'consent_withdrawn_at' => 'datetime',
         ];
+    }
+
+    /** The manager who took the consent, so a claim of consent can be attributed. */
+    public function consentRecorder(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'consent_recorded_by');
+    }
+
+    /**
+     * Whether there is valid consent to hold this person's photographs right now.
+     *
+     * Consent that was withdrawn is NOT consent, and the check has to be this explicit
+     * rather than a truthiness test on `consent_at` — a withdrawn consent still has a
+     * `consent_at`, and treating that as a yes would mean a withdrawal did nothing.
+     */
+    public function hasConsent(): bool
+    {
+        return $this->consent_at !== null && $this->consent_withdrawn_at === null;
+    }
+
+    /** Whether consent was given and later taken back. */
+    public function hasWithdrawnConsent(): bool
+    {
+        return $this->consent_at !== null && $this->consent_withdrawn_at !== null;
+    }
+
+    /** True when this person's photograph is held with no consent on record. */
+    public function needsConsent(): bool
+    {
+        return $this->photo_path !== null && ! $this->hasConsent();
+    }
+
+    /**
+     * Whether a photograph MAY be taken of this person, at any outlet.
+     *
+     * This is the consent question on its own, separate from whether the outlet wants a
+     * photograph. The two are different and conflating them is a real bug:
+     *
+     *   `isPhotographRequired()` — must a photo accompany the punch? Only at an outlet that
+     *                             asks for one, and only for someone who may be photographed.
+     *
+     *   `mayBePhotographed()`   — is a photo of this person allowed at all?
+     *
+     * The distinction matters at an outlet that does NOT require photos: an employee may
+     * still choose to supply one, and it should be stored. Treating "not required" as "not
+     * permitted" would silently throw away a photograph the person volunteered, which helps
+     * nobody and looks like the camera is broken.
+     *
+     * TWO RULES, and the difference between them is the point:
+     *
+     *  - A WITHDRAWAL is always honoured. Someone who has actively taken their consent back
+     *    is never photographed again, whatever the settings say. Their withdrawal was an
+     *    explicit instruction, and no default can override it.
+     *
+     *  - A MISSING RECORD is refused only when the owner has turned that on. It cannot be
+     *    the default, because every existing employee has no consent row — enabling it by
+     *    default would stop photographs being taken at all, silently disabling the
+     *    anti-buddy-punching control the day it shipped. See
+     *    `Setting::REQUIRE_CONSENT_FOR_PHOTOS`.
+     */
+    public function mayBePhotographed(): bool
+    {
+        if ($this->hasWithdrawnConsent()) {
+            return false;
+        }
+
+        if ($this->hasConsent()) {
+            return true;
+        }
+
+        // No record either way: the owner decides whether that is disqualifying.
+        return ! Setting::bool(Setting::REQUIRE_CONSENT_FOR_PHOTOS, false);
+    }
+
+    /**
+     * Whether a photograph is MANDATORY at this outlet for this person.
+     *
+     * Consent can only ever narrow what the outlet asks for, never widen it: a photo is never
+     * demanded at an outlet that does not want one, and never demanded of someone who may not
+     * be photographed.
+     */
+    public function isPhotographRequired(Outlet $outlet): bool
+    {
+        return $outlet->requires_photo && $this->mayBePhotographed();
+    }
+
+    /**
+     * Record consent, or record it again after a withdrawal.
+     *
+     * Re-recording after withdrawal CLEARS the withdrawal rather than leaving both
+     * timestamps set. Someone who withdrew and then changed their mind has consented, and
+     * an implementation that kept `consent_withdrawn_at` would report them as unconsented
+     * for ever.
+     */
+    public function recordConsent(
+        ConsentMethod $method,
+        ?User $recordedBy = null,
+        ?string $version = null,
+        ?string $note = null,
+    ): void {
+        $this->forceFill([
+            'consent_at' => now(),
+            'consent_method' => $method,
+            'consent_recorded_by' => $recordedBy?->id ?? $this->consent_recorded_by,
+            'consent_version' => $version ?? $this->consent_version,
+            'consent_note' => $note ?? $this->consent_note,
+            // A fresh consent replaces any previous withdrawal.
+            'consent_withdrawn_at' => null,
+            'consent_withdrawal_note' => null,
+        ])->save();
+    }
+
+    /**
+     * Withdraw consent.
+     *
+     * The original `consent_at` is left alone. Blanking it would imply consent was never
+     * given, which would call into question the lawfulness of every photograph taken while
+     * it was — and those were taken lawfully.
+     *
+     * Withdrawal stops FUTURE photographs. It does not by itself delete past ones: their
+     * retention is a separate question, handled by the retention policy and, where the
+     * person asks, by a deletion request the owner can act on.
+     */
+    public function withdrawConsent(?string $note = null): void
+    {
+        $this->forceFill([
+            'consent_withdrawn_at' => now(),
+            'consent_withdrawal_note' => $note,
+        ])->save();
     }
 
     /** @return BelongsToMany<Outlet, $this> */

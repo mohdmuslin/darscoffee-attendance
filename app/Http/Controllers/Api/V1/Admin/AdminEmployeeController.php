@@ -2,16 +2,20 @@
 
 namespace App\Http\Controllers\Api\V1\Admin;
 
+use App\Enums\ConsentMethod;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreEmployeeRequest;
 use App\Http\Requests\Admin\UpdateEmployeeRequest;
 use App\Http\Resources\EmployeeResource;
 use App\Models\Employee;
+use App\Models\Setting;
+use App\Services\ConsentService;
 use App\Services\PhotoService;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 /**
  * Employee management.
@@ -258,6 +262,103 @@ class AdminEmployeeController extends Controller
             ['employee' => new EmployeeResource($employee->fresh()->load('outlets'))],
             'Photo updated.',
         );
+    }
+
+    /**
+     * Record PDPA consent to hold this person's photograph.
+     *
+     * The recorder is taken from the authenticated user rather than the request body. A
+     * client-supplied "recorded_by" would let a manager attribute a consent to somebody
+     * else, and the attribution is the part of a consent record most likely to be relied on
+     * when it is disputed.
+     *
+     * Managers may do this for their own staff: taking consent is ordinary counter work, and
+     * the alternative — only the owner can record it — means it does not get recorded.
+     */
+    public function recordConsent(Request $request, Employee $employee, ConsentService $consent): JsonResponse
+    {
+        $this->authorizeOnRecord('update', $employee);
+
+        $validated = $request->validate([
+            'method' => ['required', 'string', Rule::enum(ConsentMethod::class)],
+            'version' => ['nullable', 'string', 'max:20'],
+            'note' => ['nullable', 'string', 'max:255'],
+            /*
+             * Acknowledgement is required, and required HERE rather than in the UI. A consent
+             * recorded without the person being told what they were agreeing to is not a
+             * consent, and a form that can be submitted without the acknowledgement is one
+             * that will be.
+             */
+            'acknowledged' => ['required', 'accepted'],
+        ]);
+
+        $employee = $consent->record(
+            $employee,
+            ConsentMethod::from($validated['method']),
+            $request->user(),
+            $validated['version'] ?? null,
+            $validated['note'] ?? null,
+        );
+
+        return ApiResponse::success(
+            ['employee' => new EmployeeResource($employee->load('outlets'))],
+            'Consent recorded.',
+        );
+    }
+
+    /**
+     * Withdraw consent.
+     *
+     * Withdrawal stops future photographs and deletes the profile photograph, but does NOT
+     * delete punch photographs — those may be evidence in an open dispute, and a person's
+     * objection does not by itself decide someone else's wage claim. Erasing them is an owner
+     * decision taken on a request, which is what `--note` records.
+     */
+    public function withdrawConsent(Request $request, Employee $employee, ConsentService $consent): JsonResponse
+    {
+        $this->authorizeOnRecord('update', $employee);
+
+        $validated = $request->validate([
+            'note' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $employee = $consent->withdraw($employee, $validated['note'] ?? null);
+
+        return ApiResponse::success(
+            ['employee' => new EmployeeResource($employee->load('outlets'))],
+            'Consent withdrawn. Photographs will no longer be taken at the punch screen, and their profile photo has been deleted.',
+        );
+    }
+
+    /**
+     * Who has a photograph on file with no consent to hold it.
+     *
+     * The compliance backlog, and the reason consent is a setting rather than always
+     * enforced: this list has to be worked through before enforcement can be turned on
+     * without stopping photographs altogether.
+     */
+    public function consentBacklog(Request $request, ConsentService $consent): JsonResponse
+    {
+        $this->authorize('viewAny', Employee::class);
+
+        return ApiResponse::success([
+            'employees' => EmployeeResource::collection(
+                $consent->withoutConsent($request->user())
+            ),
+            'enforced' => Setting::bool(Setting::REQUIRE_CONSENT_FOR_PHOTOS, false),
+            'notice_version' => ConsentService::NOTICE_VERSION,
+        ]);
+    }
+
+    /** The methods the console may offer, so the labels live in one place. */
+    public function consentMethods(): JsonResponse
+    {
+        $this->authorize('viewAny', Employee::class);
+
+        return ApiResponse::success([
+            'methods' => ConsentMethod::options(),
+            'notice_version' => ConsentService::NOTICE_VERSION,
+        ]);
     }
 
     /**

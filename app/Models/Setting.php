@@ -45,6 +45,30 @@ class Setting extends Model
     public const MISSING_CLOCKOUT_HOURS = 'missing_clockout_hours';
 
     /**
+     * Whether a staff member must have a consent record before they are photographed.
+     *
+     * DECIDED OFF (2026-09-21), and the reasoning matters because the opposite choice looks
+     * more obviously correct.
+     *
+     * Requiring consent before capture is the strictest reading of the PDPA, and it was the
+     * first implementation. It was switched off because every existing employee has no
+     * consent record, so turning it on in production does not merely refuse a few
+     * photographs — it silently stops photographs being taken AT ALL, disabling the
+     * anti-buddy-punching control the whole system rests on, on the first morning, with no
+     * obvious symptom.
+     *
+     * That is a decision for the owner to make deliberately, once the consent backlog in the
+     * console has actually been cleared. So the default is off, the console shows who has
+     * not consented, and switching this on is a conscious act that fails loudly rather than
+     * a code change that fails quietly.
+     *
+     * A WITHDRAWAL is different, and is honoured regardless of this setting: someone who has
+     * actively withdrawn consent is never photographed, because their withdrawal was an
+     * explicit instruction and cannot be overridden by a default.
+     */
+    public const REQUIRE_CONSENT_FOR_PHOTOS = 'require_consent_for_photos';
+
+    /**
      * Whether a manager's correction needs the owner's approval.
      *
      * DECIDED ON (default true), unlike rate changes. The two are not equivalent: a rate
