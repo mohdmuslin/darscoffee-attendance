@@ -286,6 +286,11 @@ The same deployment constraints as the ordering system apply: **no workers, so n
 queues.** Anything long-running is a cron command, and anything interactive must
 respond in well under a minute.
 
+**The step-by-step go-live procedure is in `docs/deployment.md`**, including the
+proxy configuration that decides whether staff photographs load at all, and
+`php artisan attendance:deploy-check`, which verifies the production configuration
+and exits non-zero if anything is wrong.
+
 ---
 
 ## 9. Offline Strategy

@@ -7,7 +7,14 @@
  * can be regenerated at any size if the branding changes. Run from the project root:
  *
  *   php scripts/make-icons.php
+ *
+ * SAFETY GATE: writes into public/icons, which on a live host is served to browsers. Guarded
+ * alongside the other helpers so a stray run on the server cannot overwrite the deployed icons.
  */
+
+require_once __DIR__.'/dev-guard.php';
+
+dev_require_local();
 
 $out = __DIR__.'/../public/icons';
 

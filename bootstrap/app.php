@@ -16,6 +16,38 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         /*
+         * Trust the proxy's forwarded headers when the host is configured to say so.
+         *
+         * WITHOUT this on a proxied host, PHP sees HTTPS requests as plain HTTP and every
+         * signed photo URL breaks — the console renders and the API works, so the fault looks
+         * like the signed URL TTL or the file permissions rather than the scheme. See
+         * `config/trustedproxy.php` for the full reasoning, including why
+         * `URL::forceScheme('https')` makes it worse instead of fixing it.
+         *
+         * READ FROM THE ENVIRONMENT, NOT `config()`. This closure runs when the kernel is
+         * resolved, which is BEFORE the config repository is bound — `config('...')` here
+         * throws "Target class [config] does not exist" and takes the whole application down,
+         * artisan included. That was written and caught the hard way.
+         *
+         * `env()` is correct here because this closure runs on every request, and with
+         * `config:cache` in place the `.env` file is not loaded on a request, so the value
+         * must already be in the real environment — which it is, because cPanel sets it in the
+         * cron and the PHP-FPM pool rather than only in `.env`. The supported way to supply it
+         * is therefore the environment, and `config/trustedproxy.php` mirrors it for the
+         * parts of the app that read config.
+         *
+         * Left unset by default, so nothing is trusted unless the host says otherwise.
+         * Trusting `*` unconditionally would let any direct caller choose their own scheme and
+         * forge `X-Forwarded-For` — and the punch endpoint is public, rate-limited by IP, and
+         * records that IP as evidence.
+         */
+        $trustedProxies = env('TRUSTED_PROXIES');
+
+        if (filled($trustedProxies)) {
+            $middleware->trustProxies(at: $trustedProxies);
+        }
+
+        /*
          * Every API request is treated as JSON, so an unauthenticated call returns
          * a clean 401 rather than redirecting to a `login` route that does not
          * exist in an API-only app — which would surface as an HTTP 500.

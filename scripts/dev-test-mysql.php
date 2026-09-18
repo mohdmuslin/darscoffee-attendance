@@ -14,7 +14,23 @@
  * and restores .env afterwards. CI runs both drivers for the same reason.
  *
  * Not part of the app.
+ *
+ * SAFETY GATE: refuses outside a local environment.
+ *
+ * This one is the most dangerous of the helpers to run on a server, and not because it deletes
+ * anything: it REWRITES `.env` to point at a scratch database, runs Pest (which migrates and
+ * seeds that scratch database), then restores `.env`. Interrupted halfway — a timeout, a closed
+ * terminal — it leaves the LIVE application pointed at an empty scratch database. Staff would
+ * scan the code in the morning and be told their PIN does not match, with nothing in the
+ * application's own logs to explain it.
+ *
+ * So the environment is checked before the backup is even taken. See `dev-guard.php` for the
+ * reasoning behind reading `.env` directly rather than asking the framework.
  */
+
+require_once __DIR__.'/dev-guard.php';
+
+dev_require_local();
 
 $root = __DIR__.'/..';
 $env = $root.'/.env';

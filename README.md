@@ -17,6 +17,9 @@ sees everything.
 | `docs/blueprint.md` | **Start here.** Scope, roles, time rules, screens, phases, open decisions |
 | `docs/architecture.md` | Components, data flows, security model, deployment, offline strategy |
 | `docs/database-design.md` | Schema and data rules — the source of truth |
+| `docs/deployment.md` | **Go-live guide** — cPanel, cron, the proxy trap, post-deploy checks |
+| `docs/hardening.md` | Retention, consent, the offline queue, backup drill, load check |
+| `docs/sso.md` | Why Attendance is the identity source and deploys first |
 
 > **Read `docs/` before changing anything involving time, money or identity.**
 > The business rules there (one open segment per employee, worked time excludes
