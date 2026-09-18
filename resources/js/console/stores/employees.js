@@ -22,6 +22,14 @@ export const useEmployeeStore = defineStore('employees', {
 
         /** Employees whose PIN is locked out after repeated failures. */
         pinLocked: (state) => state.employees.filter((employee) => employee.pin_locked),
+
+        /**
+         * Employees holding a photograph with no consent behind it.
+         *
+         * The PDPA backlog. A count rather than a filter, because it is a standing number that
+         * should reach zero — not something to go looking for.
+         */
+        withoutConsent: (state) => state.employees.filter((employee) => employee.needs_consent),
     },
 
     actions: {
@@ -109,6 +117,42 @@ export const useEmployeeStore = defineStore('employees', {
             await this.load();
 
             return employee;
+        },
+
+        /** Record PDPA consent. The recorder is taken from the token server-side. */
+        async recordConsent(id, payload) {
+            this.saving = true;
+
+            try {
+                const employee = await employeeApi.recordConsent(id, payload);
+
+                await this.load();
+
+                return employee;
+            } finally {
+                this.saving = false;
+            }
+        },
+
+        /**
+         * Withdraw consent.
+         *
+         * Reloads afterwards because withdrawal does more than set a field: the profile photo is
+         * deleted, so the row that comes back has `photo_url: null`. Leaving the stale avatar on
+         * screen would suggest the withdrawal had not taken effect.
+         */
+        async withdrawConsent(id, note = null) {
+            this.saving = true;
+
+            try {
+                const employee = await employeeApi.withdrawConsent(id, note);
+
+                await this.load();
+
+                return employee;
+            } finally {
+                this.saving = false;
+            }
         },
     },
 });

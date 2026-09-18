@@ -69,6 +69,33 @@ class Setting extends Model
     public const REQUIRE_CONSENT_FOR_PHOTOS = 'require_consent_for_photos';
 
     /**
+     * How far back an offline punch may claim to have happened.
+     *
+     * An offline queue reports its own timestamp, because the phone captured the punch at a
+     * moment when it could not reach the server. That timestamp is the whole point of the
+     * feature — without it a 7am clock-in synced at 2pm would be recorded at 2pm — and it is
+     * also the one part of a punch the client fully controls.
+     *
+     * So it is bounded. Beyond this window the claim is refused and the punch has to be
+     * corrected by a manager, who is accountable and leaves an audit row. 24 hours by default:
+     * comfortably longer than any real connectivity gap on the premises, and far shorter than
+     * the span over which backdating could quietly rewrite a pay period.
+     *
+     * Every accepted offline punch also raises an OFFLINE_SYNC anomaly, so the client-reported
+     * times are visible rather than indistinguishable from server-stamped ones.
+     */
+    public const OFFLINE_MAX_BACKDATE_HOURS = 'offline_max_backdate_hours';
+
+    /**
+     * Clock skew tolerated on a client-reported punch time.
+     *
+     * A phone whose clock runs a minute or two fast would otherwise have every offline punch
+     * refused as "in the future", which reads to the employee as the app being broken. Small
+     * enough that it cannot be used to claim work that has not happened.
+     */
+    public const OFFLINE_FUTURE_SKEW_MINUTES = 'offline_future_skew_minutes';
+
+    /**
      * Whether a manager's correction needs the owner's approval.
      *
      * DECIDED ON (default true), unlike rate changes. The two are not equivalent: a rate

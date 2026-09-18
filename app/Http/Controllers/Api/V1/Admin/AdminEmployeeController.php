@@ -40,7 +40,7 @@ class AdminEmployeeController extends Controller
         ]);
 
         $employees = Employee::query()
-            ->with('outlets')
+            ->with('outlets', 'consentRecorder')
             // The scope, applied first so nothing below can widen it again.
             ->visibleTo($request->user())
             ->when(
@@ -111,7 +111,7 @@ class AdminEmployeeController extends Controller
         });
 
         return ApiResponse::created(
-            ['employee' => new EmployeeResource($employee->load('outlets'))],
+            ['employee' => new EmployeeResource($employee->load('outlets', 'consentRecorder'))],
             'Employee added.',
         );
     }
@@ -121,7 +121,7 @@ class AdminEmployeeController extends Controller
         $this->authorizeOnRecord('view', $employee);
 
         return ApiResponse::success([
-            'employee' => new EmployeeResource($employee->load('outlets')),
+            'employee' => new EmployeeResource($employee->load('outlets', 'consentRecorder')),
         ]);
     }
 
@@ -155,7 +155,7 @@ class AdminEmployeeController extends Controller
         });
 
         return ApiResponse::success(
-            ['employee' => new EmployeeResource($employee->fresh()->load('outlets'))],
+            ['employee' => new EmployeeResource($employee->fresh()->load('outlets', 'consentRecorder'))],
             'Employee updated.',
         );
     }
@@ -178,7 +178,7 @@ class AdminEmployeeController extends Controller
         ]);
 
         return ApiResponse::success(
-            ['employee' => new EmployeeResource($employee->fresh()->load('outlets'))],
+            ['employee' => new EmployeeResource($employee->fresh()->load('outlets', 'consentRecorder'))],
             'Employee deactivated. Their history is kept.',
         );
     }
@@ -190,7 +190,7 @@ class AdminEmployeeController extends Controller
         $employee->update(['is_active' => true, 'resigned_at' => null]);
 
         return ApiResponse::success(
-            ['employee' => new EmployeeResource($employee->fresh()->load('outlets'))],
+            ['employee' => new EmployeeResource($employee->fresh()->load('outlets', 'consentRecorder'))],
             'Employee reactivated.',
         );
     }
@@ -214,7 +214,7 @@ class AdminEmployeeController extends Controller
         $employee->setPin($validated['pin']);
 
         return ApiResponse::success(
-            ['employee' => new EmployeeResource($employee->fresh()->load('outlets'))],
+            ['employee' => new EmployeeResource($employee->fresh()->load('outlets', 'consentRecorder'))],
             'PIN set. The employee can clock in with it immediately.',
         );
     }
@@ -232,7 +232,7 @@ class AdminEmployeeController extends Controller
         ])->save();
 
         return ApiResponse::success(
-            ['employee' => new EmployeeResource($employee->fresh()->load('outlets'))],
+            ['employee' => new EmployeeResource($employee->fresh()->load('outlets', 'consentRecorder'))],
             'PIN cleared. The employee cannot clock in until a new one is set.',
         );
     }
@@ -259,7 +259,7 @@ class AdminEmployeeController extends Controller
         }
 
         return ApiResponse::success(
-            ['employee' => new EmployeeResource($employee->fresh()->load('outlets'))],
+            ['employee' => new EmployeeResource($employee->fresh()->load('outlets', 'consentRecorder'))],
             'Photo updated.',
         );
     }
@@ -301,7 +301,7 @@ class AdminEmployeeController extends Controller
         );
 
         return ApiResponse::success(
-            ['employee' => new EmployeeResource($employee->load('outlets'))],
+            ['employee' => new EmployeeResource($employee->load('outlets', 'consentRecorder'))],
             'Consent recorded.',
         );
     }
@@ -325,7 +325,7 @@ class AdminEmployeeController extends Controller
         $employee = $consent->withdraw($employee, $validated['note'] ?? null);
 
         return ApiResponse::success(
-            ['employee' => new EmployeeResource($employee->load('outlets'))],
+            ['employee' => new EmployeeResource($employee->load('outlets', 'consentRecorder'))],
             'Consent withdrawn. Photographs will no longer be taken at the punch screen, and their profile photo has been deleted.',
         );
     }

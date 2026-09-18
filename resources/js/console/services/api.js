@@ -133,6 +133,43 @@ export const employeeApi = {
 
         return data.data.employee;
     },
+
+    /**
+     * PDPA consent.
+     *
+     * `acknowledged` is sent as a literal true rather than being assumed client-side: the server
+     * requires it, because a consent recorded without the person being told what they were agreeing
+     * to is not a consent. Passing it here makes that requirement visible at the call site instead
+     * of it living only in the API.
+     */
+    async recordConsent(id, payload) {
+        const { data } = await http.post(`/admin/employees/${id}/consent`, {
+            acknowledged: true,
+            ...payload,
+        });
+
+        return data.data.employee;
+    },
+
+    async withdrawConsent(id, note = null) {
+        const { data } = await http.delete(`/admin/employees/${id}/consent`, {
+            data: { note },
+        });
+
+        return data.data.employee;
+    },
+
+    async consentBacklog() {
+        const { data } = await http.get('/admin/employees/consent/backlog');
+
+        return data.data;
+    },
+
+    async consentMethods() {
+        const { data } = await http.get('/admin/employees/consent/methods');
+
+        return data.data;
+    },
 };
 
 export const userApi = {

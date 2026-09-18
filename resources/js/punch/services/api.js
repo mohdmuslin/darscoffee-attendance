@@ -25,11 +25,20 @@ export const punchApi = {
         return data.data.state;
     },
 
-    async act(action, photo = null, clientUuid = null) {
+    /**
+     * Perform a punch action.
+     *
+     * `clientUuid` and `claimedAt` are supplied only for a punch made while offline. The id lets
+     * the server recognise a retry as the same punch rather than a second one, and the claimed
+     * time is the moment the punch actually happened — without it, a clock-out queued at 15:00
+     * and synced at 20:00 would be recorded at 20:00 and invent five hours of work.
+     */
+    async act(action, photo = null, clientUuid = null, claimedAt = null) {
         const { data } = await http.post('/punch/act', {
             action,
             photo,
             client_uuid: clientUuid,
+            claimed_at: claimedAt,
         });
 
         return data;

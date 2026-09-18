@@ -370,6 +370,36 @@ it('exposes consent state on the employee resource', function () {
         ->and($employee['consent_version'])->toBe(ConsentService::NOTICE_VERSION);
 });
 
+/**
+ * The recorder's NAME must reach the client, not just the id.
+ *
+ * Found in the browser: the field silently vanished, because `consentRecorder` is a relation and
+ * `whenLoaded` omits anything not eager-loaded. The page still worked and simply showed no
+ * recorder — so the gap was invisible except as a missing name nobody knew to look for.
+ *
+ * A consent record whose recorder cannot be seen answers none of the questions it exists for.
+ */
+it('names the manager who recorded the consent', function () {
+    $this->consent->record($this->employee, ConsentMethod::SIGNED_FORM, $this->manager);
+
+    $response = $this->getJson(
+        "/api/v1/admin/employees/{$this->employee->id}",
+        asUser($this->owner),
+    )->assertOk();
+
+    expect($response->json('data.employee.consent_recorded_by'))
+        ->toBe($this->manager->name);
+});
+
+it('names the recorder in the employee listing too', function () {
+    $this->consent->record($this->employee, ConsentMethod::SIGNED_FORM, $this->manager);
+
+    $response = $this->getJson('/api/v1/admin/employees', asUser($this->owner))->assertOk();
+
+    expect($response->json('data.employees.0.consent_recorded_by'))
+        ->toBe($this->manager->name);
+});
+
 it('reports has_consent as false after a withdrawal', function () {
     $this->consent->record($this->employee, ConsentMethod::WRITTEN, $this->manager);
     $this->consent->withdraw($this->employee->fresh());

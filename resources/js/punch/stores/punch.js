@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia';
+import { punchQueue } from '../lib/queue';
 import {
     clearPunchSession,
     punchApi,
@@ -49,6 +50,19 @@ export const usePunchStore = defineStore('punch', {
         photoWasDemanded: false,
         /** Set briefly after an action so the employee sees confirmation. */
         confirmation: null,
+
+        /**
+         * Punches waiting to reach the server.
+         *
+         * Held in state so the screen can show "1 punch waiting to send" — an employee who cannot
+         * tell whether their clock-out was recorded will retry, and a retry is exactly what makes
+         * a duplicate. Showing the queue is the cheapest way to stop them.
+         */
+        queued: punchQueue.count(),
+        /** True while a drain is in progress, so two reconnects cannot overlap. */
+        syncing: false,
+        /** Result of the last drain, for a message the employee can act on. */
+        lastSync: null,
     }),
 
     getters: {
@@ -60,7 +74,22 @@ export const usePunchStore = defineStore('punch', {
 
         /** Whether this outlet wants a photo, and therefore needs camera access. */
         needsPhoto: (state) => state.outlet?.requires_photo ?? true,
-    },
+        /** Whether anything is waiting to be sent. */
+        hasQueued: (state) => state.queued > 0,
+
+        /**
+         * Whether a queued punch may be missing a photo the outlet wants.
+         *
+         * A queued punch carries no photograph — base64 images would fill localStorage and break
+         * the session token stored beside them. At an outlet that requires photos, the punch would
+         * be REFUSED on sync, so the employee needs telling to see a manager rather than waiting
+         * for a queue that can never deliver.
+         *
+         * Surfaced as a warning rather than prevented. Blocking the queue at such an outlet would
+         * mean an employee with no signal cannot clock out at all, which is worse than a punch that
+         * needs correcting afterwards.
+         */
+        queuedNeedsManager: (state) => state.queued > 0 && (state.outlet?.requires_photo ?? false),    },
 
     actions: {
         /**
@@ -200,16 +229,63 @@ export const usePunchStore = defineStore('punch', {
                 }
 
                 /*
-                 * No HTTP status means the request never reached the server, so the
-                 * punch definitely did not happen. Saying so explicitly stops the
-                 * employee walking away assuming it did — an unrecorded clock-out is
-                 * the expensive failure here. They retry when signal returns; the
-                 * session is still valid.
+                 * No HTTP status means the request never reached the server. The punch did not
+                 * happen — but the employee DID punch, so it is QUEUED rather than lost.
+                 *
+                 * This is the case the whole feature exists for. Previously the message was
+                 * "your punch was NOT recorded", which was honest and useless: the employee's only
+                 * options were to stand there retrying or to walk away with nothing recorded.
+                 *
+                 * The punch time is captured HERE, at the moment they pressed the button, not when
+                 * the queue eventually drains. Queueing it now and sending the sync time later
+                 * would invent hours they were not there.
                  */
                 if (! error.status) {
-                    this.error = 'No connection. Your punch was NOT recorded — try again once you have signal.';
+                    /*
+                     * A photo cannot be queued. Base64 images are hundreds of kilobytes, and
+                     * localStorage caps around 5MB — filling it would break the session token
+                     * stored alongside. So the photo is dropped, which at an outlet that requires
+                     * one means the punch will be refused on sync.
+                     *
+                     * That is stated plainly rather than hidden, and the flow still queues: an
+                     * employee with no signal who cannot clock out at all is worse off than one
+                     * whose punch needs a manager's correction afterwards.
+                     */
+                    const queuedOk = punchQueue.add(action);
 
-                    return false;
+                    this.queued = punchQueue.count();
+
+                    if (! queuedOk) {
+                        this.error = 'No connection, and this phone has no room to store the punch. Tell a manager.';
+
+                        return false;
+                    }
+
+                    this.confirmation = photo === null
+                        ? 'No connection. Saved on this phone — it will send when you have signal.'
+                        : 'No connection. Saved without the photo — a manager will need to add it.';
+
+                    if (confirmationTimer) {
+                        clearTimeout(confirmationTimer);
+                    }
+
+                    confirmationTimer = setTimeout(() => {
+                        this.confirmation = null;
+                        confirmationTimer = null;
+                    }, 6000);
+
+                    /*
+                     * The state is advanced locally, so the buttons reflect what the employee just
+                     * did. Leaving the screen on "clock in" after they pressed clock in would
+                     * invite a second press — and the queue would then hold two clock-ins.
+                     *
+                     * This is a LOCAL prediction, not the server's answer. It is corrected on the
+                     * next drain, when the server returns the real state.
+                     */
+                    this.state = this.predictState(action, this.state);
+                    this.error = null;
+
+                    return true;
                 }
 
                 return false;
@@ -218,8 +294,118 @@ export const usePunchStore = defineStore('punch', {
             }
         },
 
-        async loadHours() {
-            this.loading = true;
+        /**
+         * Predict the state after an action, for use while offline only.
+         *
+         * Necessary because the buttons are driven by the server's state, and a queued punch
+         * produces no response. Without a prediction the screen still offers "clock in" after the
+         * employee pressed it, so they press it again — and the queue then holds two clock-ins.
+         *
+         * This is deliberately a SMALL model of the same rules the server applies, and it is
+         * REPLACED by the server's answer on the next drain. It is not a second source of truth;
+         * it is a placeholder that stops the screen lying for a few minutes.
+         *
+         * Actions are filtered to the single one that follows, so the employee cannot build up a
+         * sequence of contradictory punches in the queue.
+         */
+        predictState(action, current) {
+            const base = current ?? {};
+
+            const next = {
+                clock_in: 'working',
+                start_break: 'on_break',
+                end_break: 'working',
+                clock_out: 'clocked_out',
+            }[action] ?? base.state ?? 'clocked_out';
+
+            const labels = {
+                clocked_out: 'Not clocked in',
+                working: 'Clocked in',
+                on_break: 'On a break',
+            };
+
+            /*
+             * Both the WORK actions offered, because from `working` the employee may either break
+             * or finish. The server narrows this further on the next refresh.
+             */
+            const actions = {
+                clocked_out: ['clock_in'],
+                working: ['start_break', 'clock_out'],
+                on_break: ['end_break', 'clock_out'],
+            }[next] ?? [];
+
+            return {
+                ...base,
+                state: next,
+                label: labels[next] ?? base.label,
+                actions,
+                /*
+                 * Marked so the screen can say the state is not yet confirmed. Without this the
+                 * employee would read "Clocked in" as the server having accepted the punch.
+                 */
+                pending: true,
+            };
+        },
+
+        /**
+         * Send everything queued.
+         *
+         * Called on reconnect and after a successful action, because the first sign the phone is
+         * back online is usually the employee doing something else. The queued punches then drain
+         * in the background rather than at a moment they have to think about.
+         */
+        async drainQueue() {
+            // A second drain while one is running would send every entry twice. The server would
+            // deduplicate, but only by rejecting the second attempt as a duplicate — noise in the
+            // trail for no reason.
+            if (this.syncing || punchQueue.isEmpty()) {
+                this.queued = punchQueue.count();
+
+                return this.lastSync;
+            }
+
+            this.syncing = true;
+
+            try {
+                const result = await punchQueue.drain();
+
+                this.queued = punchQueue.count();
+                this.lastSync = result;
+
+                if (result.needsSignIn) {
+                    /*
+                     * The queue is intact and waiting, so this is an instruction, not a failure.
+                     * Saying "a punch could not be recorded" here would be a lie — nothing was
+                     * lost — and would send the employee to a manager for a problem that scanning
+                     * the code solves.
+                     */
+                    this.error = 'Your saved punches are safe. Scan the code and enter your PIN to send them.';
+                } else if (result.failed > 0) {
+                    /*
+                     * A genuine refusal is reported, not swallowed. It means a punch the employee
+                     * believes was recorded has been dropped, and they need to tell a manager — the
+                     * correction path exists for exactly this.
+                     */
+                    this.error = result.failed === 1
+                        ? 'One saved punch could not be recorded. Please tell a manager.'
+                        : `${result.failed} saved punches could not be recorded. Please tell a manager.`;
+                }
+
+                /*
+                 * The server's state replaces the local prediction once anything has landed, because
+                 * only it knows the truth after a drain that may have spanned several actions.
+                 */
+                if (result.sent > 0 && this.session) {
+                    await this.resume();
+                }
+
+                return result;
+            } finally {
+                this.syncing = false;
+            }
+        },
+
+        async loadHours() {            this.loading = true;
 
             try {
                 this.hours = await punchApi.myHours();
@@ -232,6 +418,21 @@ export const usePunchStore = defineStore('punch', {
 
         forget() {
             clearPunchSession();
+
+            /*
+             * The queue is cleared too, and it must be.
+             *
+             * The queue belongs to the person who created it, and this is a SHARED phone in a
+             * kitchen. A queue surviving a logout would drain under the next person's session —
+             * attributing one employee's punches to another, which is exactly the problem the
+             * punch photo and the anomaly queue exist to detect.
+             *
+             * The cost is real: an employee who logs out with punches still queued loses them. That
+             * is the lesser harm, and the sync warning exists to tell them before they do.
+             */
+            punchQueue.clear();
+            this.queued = 0;
+            this.lastSync = null;
 
             if (confirmationTimer) {
                 clearTimeout(confirmationTimer);

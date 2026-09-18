@@ -22,7 +22,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 #[Fillable([
     'employee_id', 'outlet_id', 'outlet_token_id', 'time_entry_id',
-    'event', 'ip_address', 'user_agent', 'meta', 'created_at',
+    'event', 'client_uuid', 'ip_address', 'user_agent', 'meta', 'created_at',
 ])]
 class PunchEvent extends Model
 {
@@ -61,6 +61,7 @@ class PunchEvent extends Model
         ?string $ipAddress = null,
         ?string $userAgent = null,
         array $meta = [],
+        ?string $clientUuid = null,
     ): self {
         return static::create([
             'employee_id' => $employeeId,
@@ -68,6 +69,12 @@ class PunchEvent extends Model
             'outlet_token_id' => $tokenId,
             'time_entry_id' => $timeEntryId,
             'event' => $event,
+            /*
+             * The client's id, when there is one, making this row the record that a queued punch
+             * was already applied. Stored on the trail rather than only on the segment, because
+             * a clock-out creates no segment — see the migration for what went wrong.
+             */
+            'client_uuid' => $clientUuid,
             'ip_address' => $ipAddress,
             'user_agent' => $userAgent !== null ? mb_substr($userAgent, 0, 255) : null,
             'meta' => $meta === [] ? null : $meta,

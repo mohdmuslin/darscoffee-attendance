@@ -29,6 +29,25 @@ enum PunchEventType: string
     /** Refused for a reason that is none of the above — an expired session, say. */
     case REJECTED = 'rejected';
 
+    /**
+     * A punch that happened on the phone while offline and was sent later.
+     *
+     * Its own event rather than being folded in with the ordinary clock-in, because the time
+     * on it is CLIENT-REPORTED. The server did not witness it, so it cannot be treated as
+     * equivalent to a punch that arrived live — and a manager reading the trail needs to see
+     * which moments the system actually observed.
+     */
+    case OFFLINE_SYNC = 'offline_sync';
+
+    /**
+     * A punch that arrived twice with the same client id, so the first was kept.
+     *
+     * Recorded rather than ignored. A retry is normal and expected — the phone could not tell
+     * whether its first attempt landed — but a FLOOD of them is worth seeing, because it means
+     * something is wrong with a device or a connection that is otherwise invisible.
+     */
+    case DUPLICATE_IGNORED = 'duplicate_ignored';
+
     public function label(): string
     {
         return match ($this) {
@@ -40,6 +59,8 @@ enum PunchEventType: string
             self::BREAK_END => 'Break ended',
             self::CLOCK_OUT => 'Clocked out',
             self::REJECTED => 'Refused',
+            self::OFFLINE_SYNC => 'Synced from offline',
+            self::DUPLICATE_IGNORED => 'Duplicate ignored',
         };
     }
 

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
+import ConsentDialog from '../components/ConsentDialog.vue';
 import { useAuthStore } from '../stores/auth';
 import { useEmployeeStore } from '../stores/employees';
 import { useOutletStore } from '../stores/outlets';
@@ -12,6 +13,7 @@ const outlets = useOutletStore();
 const busyId = ref(null);
 const pinDialog = ref(null);
 const pinValue = ref('');
+const consentDialog = ref(null);
 
 onMounted(async () => {
     await outlets.load();
@@ -237,6 +239,30 @@ async function clearPin(employee) {
                         PIN set
                     </span>
 
+                    <!--
+                        Consent state, shown only when there is something to act on.
+                        
+                        A green "consented" badge on every row would be noise. Amber means a
+                        photograph is held with no consent behind it — the compliance backlog — and
+                        red means someone has withdrawn, which is a state that must not be missed
+                        because it means the punch screen behaves differently for them.
+                    -->
+                    <button
+                        type="button"
+                        class="rounded-full px-2 py-1 font-medium"
+                        :class="{
+                            'bg-amber-100 text-amber-900': employee.needs_consent,
+                            'bg-red-100 text-red-800': employee.consent_withdrawn,
+                            'bg-stone-100 text-stone-600': ! employee.needs_consent && ! employee.consent_withdrawn,
+                        }"
+                        @click="consentDialog = employee"
+                    >
+                        <template v-if="employee.consent_withdrawn">consent withdrawn</template>
+                        <template v-else-if="employee.needs_consent">no consent on record</template>
+                        <template v-else-if="employee.has_consent">consent recorded</template>
+                        <template v-else>consent —</template>
+                    </button>
+
                     <button
                         type="button"
                         class="rounded-lg border border-stone-300 px-2.5 py-1.5 font-medium disabled:opacity-40"
@@ -320,5 +346,17 @@ async function clearPin(employee) {
                 </div>
             </div>
         </div>
+
+        <!--
+            The dialog is given the id, and looks the employee up in the store, so that after a
+            consent is recorded the reloaded row is what it renders. Passing the stale object would
+            leave it showing "no consent on record" immediately after consent was recorded — which
+            reads as the save having silently failed.
+        -->
+        <ConsentDialog
+            v-if="consentDialog"
+            :employee-id="consentDialog.id"
+            @close="consentDialog = null"
+        />
     </div>
 </template>

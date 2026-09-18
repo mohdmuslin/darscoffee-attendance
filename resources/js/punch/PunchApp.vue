@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import { usePunchStore } from './stores/punch';
 import ScanStep from './components/ScanStep.vue';
 import PinStep from './components/PinStep.vue';
@@ -11,6 +11,17 @@ const punch = usePunchStore();
 const showHours = ref(false);
 const scannedToken = ref(null);
 
+/**
+ * Drain queued punches when the phone comes back online.
+ *
+ * `online` is the event that matters here: the employee's first sign of signal returning is
+ * usually the browser's, well before they press anything. Waiting for the next action would leave
+ * a queued clock-out sitting on the phone while they walk home.
+ */
+function onOnline() {
+    punch.drainQueue();
+}
+
 onMounted(async () => {
     /*
      * Try to recover a session before showing the scanner. A phone that locked
@@ -18,6 +29,19 @@ onMounted(async () => {
      * the employee only wanted to end a break.
      */
     await punch.resume();
+
+    /*
+     * Anything queued from a previous visit is sent now. A reload is a common way for someone to
+     * reconnect deliberately, and waiting for them to press a button means the queue drains at a
+     * moment of their choosing rather than at the first opportunity.
+     */
+    await punch.drainQueue();
+
+    window.addEventListener('online', onOnline);
+});
+
+onUnmounted(() => {
+    window.removeEventListener('online', onOnline);
 });
 
 function onScanned(token) {
@@ -40,6 +64,30 @@ function onPinBack() {
 
         <p v-if="punch.error" class="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
             {{ punch.error }}
+        </p>
+
+        <!--
+            Punches waiting on this phone.
+            
+            Shown because an employee who cannot tell whether their clock-out was recorded will
+            press the button again — and a retry is what creates a duplicate. A visible count is the
+            cheapest way to stop that, and it sets the expectation that the punch is safe rather than
+            lost.
+        -->
+        <p
+            v-if="punch.hasQueued"
+            class="mb-4 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        >
+            <template v-if="punch.syncing">
+                Sending {{ punch.queued }} saved punch(es)…
+            </template>
+            <template v-else>
+                {{ punch.queued }} punch(es) saved on this phone, waiting for signal.
+                <span v-if="punch.queuedNeedsManager" class="mt-1 block font-medium">
+                    This outlet needs a photo, and photos cannot be saved offline — tell a manager
+                    so they can add it.
+                </span>
+            </template>
         </p>
 
         <!--

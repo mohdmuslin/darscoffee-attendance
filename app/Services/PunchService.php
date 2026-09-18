@@ -14,6 +14,7 @@ use App\Models\PunchSession;
 use App\Models\Setting;
 use App\Models\Shift;
 use App\Models\TimeEntry;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -35,7 +36,10 @@ use Illuminate\Support\Str;
  */
 class PunchService
 {
-    public function __construct(private readonly PhotoService $photos) {}
+    public function __construct(
+        private readonly PhotoService $photos,
+        private readonly OfflinePunchService $offline,
+    ) {}
 
     // ---- Entry: scan a code, then a PIN ------------------------------
 
@@ -179,10 +183,21 @@ class PunchService
 
     // ---- The three actions ------------------------------------------
 
-    /** Open a WORK segment. */
-    public function clockIn(PunchSession $session, ?string $photoBytes = null, ?string $extension = 'jpg'): TimeEntry
-    {
-        return DB::transaction(function () use ($session, $photoBytes, $extension) {
+    /**
+     * Open a WORK segment.
+     *
+     * `$at` and `$clientUuid` are supplied only for a punch that was made while offline and is
+     * being sent later. When they are null — which is every ordinary punch — the server stamps
+     * its own time and generates its own id, exactly as before.
+     */
+    public function clockIn(
+        PunchSession $session,
+        ?string $photoBytes = null,
+        ?string $extension = 'jpg',
+        ?\DateTimeInterface $at = null,
+        ?string $clientUuid = null,
+    ): TimeEntry {
+        return DB::transaction(function () use ($session, $photoBytes, $extension, $at, $clientUuid) {
             $employee = $session->employee;
 
             $open = $this->openSegment($employee);
@@ -205,7 +220,7 @@ class PunchService
                 return $open;
             }
 
-            return $this->createSegment($session, TimeEntryType::WORK, $photoBytes, $extension);
+            return $this->createSegment($session, TimeEntryType::WORK, $photoBytes, $extension, $clientUuid, $at);
         });
     }
 
@@ -216,26 +231,36 @@ class PunchService
      * with nothing to subtract — and a one-hour lunch can never become an hour of
      * overtime.
      */
-    public function startBreak(PunchSession $session, ?string $photoBytes = null, ?string $extension = 'jpg'): ?TimeEntry
-    {
-        return DB::transaction(function () use ($session, $photoBytes, $extension) {
+    public function startBreak(
+        PunchSession $session,
+        ?string $photoBytes = null,
+        ?string $extension = 'jpg',
+        ?\DateTimeInterface $at = null,
+        ?string $clientUuid = null,
+    ): ?TimeEntry {
+        return DB::transaction(function () use ($session, $photoBytes, $extension, $at, $clientUuid) {
             $employee = $session->employee;
 
-            $this->closeOpenSegment($employee, $session);
+            $this->closeOpenSegment($employee, $session, $at);
 
-            return $this->createSegment($session, TimeEntryType::BREAK, $photoBytes, $extension);
+            return $this->createSegment($session, TimeEntryType::BREAK, $photoBytes, $extension, $clientUuid, $at);
         });
     }
 
     /** End a break: close the break segment, open a work segment again. */
-    public function endBreak(PunchSession $session, ?string $photoBytes = null, ?string $extension = 'jpg'): ?TimeEntry
-    {
-        return DB::transaction(function () use ($session, $photoBytes, $extension) {
+    public function endBreak(
+        PunchSession $session,
+        ?string $photoBytes = null,
+        ?string $extension = 'jpg',
+        ?\DateTimeInterface $at = null,
+        ?string $clientUuid = null,
+    ): ?TimeEntry {
+        return DB::transaction(function () use ($session, $photoBytes, $extension, $at, $clientUuid) {
             $employee = $session->employee;
 
-            $this->closeOpenSegment($employee, $session);
+            $this->closeOpenSegment($employee, $session, $at);
 
-            return $this->createSegment($session, TimeEntryType::WORK, $photoBytes, $extension);
+            return $this->createSegment($session, TimeEntryType::WORK, $photoBytes, $extension, $clientUuid, $at);
         });
     }
 
@@ -245,9 +270,14 @@ class PunchService
      * From a break this closes the break, which is correct — the employee stopped
      * working when the break started.
      */
-    public function clockOut(PunchSession $session, ?string $photoBytes = null, ?string $extension = 'jpg'): ?TimeEntry
-    {
-        return DB::transaction(function () use ($session, $photoBytes, $extension) {
+    public function clockOut(
+        PunchSession $session,
+        ?string $photoBytes = null,
+        ?string $extension = 'jpg',
+        ?\DateTimeInterface $at = null,
+        ?string $clientUuid = null,
+    ): ?TimeEntry {
+        return DB::transaction(function () use ($session, $photoBytes, $extension, $at) {
             $employee = $session->employee;
 
             $open = $this->openSegment($employee);
@@ -260,7 +290,14 @@ class PunchService
                 ? $this->photos->storeBytes($photoBytes, 'punches', $extension)
                 : null;
 
-            $open->close(now(), $photoPath, $session->outlet_token_id);
+            /*
+             * Closed at the claimed moment, not at now().
+             *
+             * A clock-out queued at 15:00 and synced at 20:00 must end the segment at 15:00,
+             * or the five hours between are added to the shift — which is the single most
+             * expensive way to get this wrong, and would make the queue worse than useless.
+             */
+            $open->close($at ?? CarbonImmutable::now(), $photoPath, $session->outlet_token_id);
 
             $this->flagOnClose($open);
 
@@ -278,15 +315,18 @@ class PunchService
             ->first();
     }
 
-    private function closeOpenSegment(Employee $employee, PunchSession $session): void
-    {
+    private function closeOpenSegment(
+        Employee $employee,
+        PunchSession $session,
+        ?\DateTimeInterface $at = null,
+    ): void {
         $open = $this->openSegment($employee);
 
         if ($open === null) {
             return;
         }
 
-        $open->close(now(), null, $session->outlet_token_id);
+        $open->close($at ?? CarbonImmutable::now(), null, $session->outlet_token_id);
 
         $this->flagOnClose($open);
     }
@@ -296,6 +336,8 @@ class PunchService
         TimeEntryType $type,
         ?string $photoBytes,
         string $extension,
+        ?string $clientUuid = null,
+        ?\DateTimeInterface $startedAt = null,
     ): TimeEntry {
         $employee = $session->employee;
         $outlet = $session->outlet;
@@ -304,14 +346,30 @@ class PunchService
             ? $this->photos->storeBytes($photoBytes, 'punches', $extension)
             : null;
 
-        $startedAt = now();
+        /*
+         * Server time unless the client supplied one, which only happens for a punch made
+         * offline. `OfflinePunchService::resolveTimestamp()` has already bounded any supplied
+         * value, so this is not a trust decision — it is a value that was checked before it
+         * got here.
+         */
+        $startedAt = $startedAt !== null
+            ? CarbonImmutable::instance($startedAt)
+            : CarbonImmutable::now();
 
         $entry = TimeEntry::create([
             /*
-             * Generated server-side rather than on the phone: this app has no offline
-             * queue yet, so a client-supplied id would be a value the client controls
-             * with no benefit. The column exists now so an offline queue can populate
-             * it later without a migration.
+             * A FRESH id, never the client's — even when one was supplied.
+             *
+             * The segment's `client_uuid` is UNIQUE, and the client's id is already written to
+             * `punch_events` as the retry ledger. Writing the same value here as well made two
+             * different employees who happened to reuse an id collide on the segment table, which
+             * surfaced as a 500 rather than as anything meaningful — and worse, it made the two
+             * ledgers disagree about who a punch belonged to.
+             *
+             * This column therefore stays what it always was: a unique marker on the segment, so
+             * an offline queue can populate it without a migration if a future need arises. The
+             * retry ledger lives in `punch_events`, which is the only table that sees closures as
+             * well as creations.
              */
             'client_uuid' => (string) Str::uuid(),
             'employee_id' => $employee->id,

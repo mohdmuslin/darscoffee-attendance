@@ -6,13 +6,16 @@ use App\Enums\PunchEventType;
 use App\Http\Controllers\Controller;
 use App\Models\PunchEvent;
 use App\Models\PunchSession;
+use App\Services\OfflinePunchService;
 use App\Services\PhotoService;
 use App\Services\PunchService;
 use App\Services\PunchStateService;
 use App\Support\ApiResponse;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use InvalidArgumentException;
 
 /**
  * The public punch flow.
@@ -28,6 +31,7 @@ class PunchController extends Controller
     public function __construct(
         private readonly PunchService $punch,
         private readonly PunchStateService $state,
+        private readonly OfflinePunchService $offline,
     ) {}
 
     /**
@@ -132,6 +136,15 @@ class PunchController extends Controller
             'action' => ['required', 'string', 'in:clock_in,start_break,end_break,clock_out'],
             'photo' => ['sometimes', 'nullable', 'string'],
             'client_uuid' => ['sometimes', 'nullable', 'uuid'],
+            /*
+             * When the punch actually happened, as reported by the phone. Present only for a
+             * punch made while offline; absent for every ordinary punch, which is then stamped
+             * with server time as always.
+             *
+             * This is the one field a client can lie about, so it is bounded rather than
+             * trusted — see OfflinePunchService.
+             */
+            'claimed_at' => ['sometimes', 'nullable', 'date'],
         ]);
 
         $session = $this->sessionFrom($request);
@@ -143,6 +156,111 @@ class PunchController extends Controller
                 401,
                 'SESSION_EXPIRED',
             );
+        }
+
+        /*
+         * ------------------------------------------------------------------
+         * Idempotency, checked FIRST — before the photo, before the action.
+         * ------------------------------------------------------------------
+         *
+         * A queued punch is retried until it succeeds, and the phone cannot tell "the request
+         * never arrived" from "the reply never arrived". So a retry may well be a punch this
+         * server already recorded, and answering it as a fresh action would apply it twice — a
+         * second clock-out, or a break closed at the wrong moment.
+         *
+         * Matched against the PUNCH TRAIL rather than the segment table. The first version used
+         * `time_entries.client_uuid`, which only covers actions that create a segment: a
+         * clock-out closes one and stored its id nowhere, so a retry was refused as out-of-order
+         * and the employee was stranded on the clock. The trail records every action, so it is
+         * the only ledger that can answer this for closures as well as creations.
+         *
+         * Safe against a genuine race because `punch_events.client_uuid` is UNIQUE: two
+         * simultaneous duplicates cannot both insert, so the loser fails rather than quietly
+         * applying the action a second time.
+         *
+         * Answered as a success, not a 409. The client is a phone draining a queue and can do
+         * nothing useful with an error — it would retry for ever. Returning the stored result
+         * lets the queue advance.
+         */
+        $applied = $this->offline->findAppliedEvent(
+            $validated['client_uuid'] ?? null,
+            (int) $session->employee_id,
+        );
+
+        if ($applied !== null) {
+            PunchEvent::record(
+                PunchEventType::DUPLICATE_IGNORED,
+                employeeId: $session->employee_id,
+                outletId: $session->outlet_id,
+                tokenId: $session->outlet_token_id,
+                timeEntryId: $applied->time_entry_id,
+                ipAddress: $request->ip(),
+                meta: ['action' => $validated['action']],
+            );
+
+            return ApiResponse::success([
+                'state' => $this->state->for($session->fresh(['employee', 'outlet'])),
+                'entry_id' => $applied->time_entry_id,
+                'duplicate' => true,
+            ], 'Already recorded — nothing was changed.');
+        }
+
+        $serverTime = CarbonImmutable::now();
+
+        /*
+         * A client-supplied time is bounded, not trusted. Out of bounds is a REFUSAL rather
+         * than a clamp: silently recording a different time from the one claimed would leave
+         * the employee unaware their punch had been altered, with nothing for a manager to
+         * review. The correction path exists for exactly this case.
+         */
+        $at = $this->offline->resolveTimestamp($validated['claimed_at'] ?? null);
+
+        if ($at === null) {
+            PunchEvent::record(
+                PunchEventType::REJECTED,
+                employeeId: $session->employee_id,
+                outletId: $session->outlet_id,
+                tokenId: $session->outlet_token_id,
+                ipAddress: $request->ip(),
+                meta: [
+                    'action' => $validated['action'],
+                    'reason' => 'claimed_at_out_of_bounds',
+                    'claimed_at' => $validated['claimed_at'] ?? null,
+                ],
+            );
+
+            return ApiResponse::error(
+                'That punch time is outside the window we can accept. Ask a manager to add it.',
+                null,
+                422,
+                'CLAIMED_AT_OUT_OF_BOUNDS',
+            );
+        }
+
+        $clientUuid = $validated['client_uuid'] ?? null;
+        $isOffline = $this->offline->isOfflineReport($validated['claimed_at'] ?? null);
+
+        /*
+         * An out-of-order queue is refused rather than half-applied. A clock-out with nothing
+         * open would create a segment ending before it started — a negative duration, which is
+         * the corruption `durationSeconds()` clamps against.
+         */
+        try {
+            $this->offline->assertActionIsCoherent(
+                $validated['action'],
+                $this->punch->openSegment($session->employee),
+            );
+        } catch (InvalidArgumentException $e) {
+            PunchEvent::record(
+                PunchEventType::REJECTED,
+                employeeId: $session->employee_id,
+                outletId: $session->outlet_id,
+                tokenId: $session->outlet_token_id,
+                ipAddress: $request->ip(),
+                meta: ['action' => $validated['action'], 'reason' => 'out_of_order'],
+            );
+
+            return ApiResponse::error($e->getMessage(), null, 422, 'OUT_OF_ORDER_PUNCH');
         }
 
         [$photoBytes, $extension] = $this->decodePhoto($validated['photo'] ?? null);
@@ -209,19 +327,36 @@ class PunchController extends Controller
         }
 
         $entry = match ($validated['action']) {
-            'clock_in' => $this->punch->clockIn($session, $photoBytes, $extension),
-            'start_break' => $this->punch->startBreak($session, $photoBytes, $extension),
-            'end_break' => $this->punch->endBreak($session, $photoBytes, $extension),
-            'clock_out' => $this->punch->clockOut($session, $photoBytes, $extension),
+            'clock_in' => $this->punch->clockIn($session, $photoBytes, $extension, $at, $clientUuid),
+            'start_break' => $this->punch->startBreak($session, $photoBytes, $extension, $at, $clientUuid),
+            'end_break' => $this->punch->endBreak($session, $photoBytes, $extension, $at, $clientUuid),
+            'clock_out' => $this->punch->clockOut($session, $photoBytes, $extension, $at, $clientUuid),
         };
+
+        /*
+         * A punch whose time the client reported is labelled and flagged.
+         *
+         * Both marks matter for different readers: `is_offline_sync` is what the timesheet and
+         * pay code filter on, while the anomaly is what a manager sees in the review queue.
+         * Setting only one would leave the other audience unable to tell a client-reported
+         * time from one the server witnessed.
+         */
+        if ($isOffline && $entry !== null) {
+            $entry->forceFill(['is_offline_sync' => true])->save();
+            $this->offline->markSynced($entry, $at, $serverTime);
+        }
 
         /*
          * Every successful action is trailed, so "the system lost my clock-out" can be
          * answered with the moment it was recorded, from which device, against which
          * code.
+         *
+         * This row is ALSO the idempotency ledger when the client supplied an id: it is what a
+         * retry will match against, for actions that close a segment as well as ones that open
+         * one.
          */
         PunchEvent::record(
-            PunchEventType::forAction($validated['action']),
+            $isOffline ? PunchEventType::OFFLINE_SYNC : PunchEventType::forAction($validated['action']),
             employeeId: $session->employee_id,
             outletId: $session->outlet_id,
             tokenId: $session->outlet_token_id,
@@ -231,12 +366,17 @@ class PunchController extends Controller
             meta: [
                 'device' => $session->device,
                 'photo' => $photoBytes !== null,
+                // Recorded so the trail shows what was claimed alongside what was stored.
+                'claimed_at' => $at->toIso8601String(),
+                'recorded_at' => $serverTime->toIso8601String(),
             ],
+            clientUuid: $clientUuid,
         );
 
         return ApiResponse::success([
             'state' => $this->state->for($session->fresh(['employee', 'outlet'])),
             'entry_id' => $entry?->id,
+            'offline' => $isOffline,
         ], $this->confirmation($validated['action']));
     }
 
