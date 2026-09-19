@@ -173,14 +173,37 @@ It will:
 2. Install dependencies and build the frontend on Linux.
 3. Upload over **FTPS** (encrypted).
 
-The first run transfers roughly 10,000 files and takes several minutes. Later deploys send
+### ⚠️ The first run is a rehearsal, on purpose
+
+**Nothing is uploaded until you arm it.** The transfer action *reconciles* rather than adds:
+it **deletes** remote files that are not in the local tree. On the first run that is
+dangerous, because it does not yet know which files are the application's.
+
+So until you set the repository variable, the workflow connects, compares, and **reports**
+what it would do without changing anything.
+
+1. Run the workflow and open its log.
+2. **Read the list of files it says it would delete.** Confirm they are only files this
+   application owns — nothing of yours that happened to be in that folder.
+3. If the list looks right, arm it:
+
+   **Settings → Secrets and variables → Actions → Variables → New variable**
+
+   Name `FTP_DEPLOY_ENABLED`, value `true`.
+
+4. Run the workflow again. That run transfers for real.
+
+The first real run moves roughly 10,000 files and takes several minutes. Later deploys send
 only what changed and take seconds, because the action keeps a state file.
 
 ### ⚠️ Point the workflow at your directory
 
-`server-dir` in `.github/workflows/deploy.yml` is set to `./`. Change it to your app
-directory if the FTP account lands anywhere other than the application root — check by
-connecting and looking at where you are placed.
+`server-dir` is `./`, meaning wherever the FTP account lands. If that is not the application
+directory, the dry-run log will make it obvious — it would list deletions of files that are
+not yours. In that case set `server-dir` to the correct path before arming.
+
+This is the single most important thing to check before the first real transfer, and the
+reason the rehearsal exists.
 
 ---
 

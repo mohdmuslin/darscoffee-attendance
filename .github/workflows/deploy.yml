@@ -107,8 +107,22 @@ jobs:
       # certificate these hosts typically present — the transfer is still encrypted, which is
       # the point; it is not certificate-verified, which cannot be fixed from here.
       #
-      # The action keeps a state file, so only CHANGED files are sent after the first run. The
-      # first deploy moves roughly 10,000 files and takes a while; later ones take seconds.
+      # SAFETY: THIS ACTION DELETES REMOTE FILES.
+      #
+      # It reconciles rather than adds, so anything on the server that is not in the local tree
+      # is removed. On the first run that is dangerous: `server-dir: ./` means wherever the FTP
+      # account lands, and if that is not the application's own folder it would delete whatever
+      # else lives there before uploading.
+      #
+      # So the deploy is ARMED rather than automatic. Until the repository variable
+      # `FTP_DEPLOY_ENABLED` is exactly `true`, `dry-run` is on: the action connects, compares,
+      # and REPORTS what it would change without changing anything. Read that output and confirm
+      # the deletions are only files this application owns, then set the variable.
+      #
+      # Settings → Secrets and variables → Actions → Variables → New variable
+      #
+      # After the first real deploy this matters much less, because the state file means later
+      # runs only touch what actually changed. It is the initial reconciliation that is unsafe.
       # ---------------------------------------------------------------
       - name: Deploy over FTPS
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
@@ -121,13 +135,14 @@ jobs:
           security: loose
           local-dir: ./
           server-dir: ./
+          dry-run: ${{ vars.FTP_DEPLOY_ENABLED != 'true' }}
 
           # ---------------------------------------------------------------
-          # THE MOST IMPORTANT PART OF THIS FILE.
+          # EXCLUDE — the most important part of this file.
           #
-          # `exclude` does two jobs: it keeps junk off the server, and — because the action
-          # DELETES remote files that are not in the local tree — it protects server state that
-          # exists nowhere else. Getting this wrong on the first run is unrecoverable.
+          # It does two jobs: keeps junk off the server, and protects server state that exists
+          # nowhere else, because anything not listed here is DELETED from the server when it
+          # is absent locally.
           #
           #   .env                  database password and APP_KEY. Never in the repository, so
           #                         without this the deploy would delete it and the site would
@@ -178,14 +193,32 @@ jobs:
             storage/logs/**
             storage/framework/**
 
+      # ---------------------------------------------------------------
+      # Tell the reader which of the two modes just ran.
+      #
+      # Without this the step above succeeds either way, and a rehearsal is indistinguishable
+      # from a deploy in the Actions UI — which is exactly how somebody concludes the site was
+      # updated when nothing was transferred.
+      # ---------------------------------------------------------------
       - name: Report
         run: |
           {
-            echo "### Deployed"
-            echo ""
-            echo "Commit \`${{ github.sha }}\` uploaded over FTPS."
-            echo ""
-            echo "**If this deploy included a migration, it has NOT been applied yet.**"
-            echo ""
-            echo "See \`docs/deployment.md\` — drop the deploy flag, and the cron entry applies it."
+            if [ "${{ vars.FTP_DEPLOY_ENABLED }}" = "true" ]; then
+              echo "### Deployed"
+              echo ""
+              echo "Commit \`${{ github.sha }}\` uploaded over FTPS."
+              echo ""
+              echo "**If this release included a migration, it has NOT been applied yet.**"
+              echo "See \`docs/deployment.md\` — drop the deploy flag and the cron entry applies it."
+            else
+              echo "### Rehearsal only — NOTHING was uploaded"
+              echo ""
+              echo "\`FTP_DEPLOY_ENABLED\` is not set to \`true\`, so the transfer ran in **dry-run** mode."
+              echo ""
+              echo "**Read the step log above.** It lists every remote file that would be created"
+              echo "or deleted. Confirm the deletions are only files this application owns, then arm it:"
+              echo ""
+              echo "Settings → Secrets and variables → Actions → Variables → New variable"
+              echo "\`FTP_DEPLOY_ENABLED\` = \`true\`"
+            fi
           } >> $GITHUB_STEP_SUMMARY
