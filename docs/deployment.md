@@ -1,260 +1,285 @@
-# Deployment — Dars Attendance (cPanel)
+# Deployment — Dars Attendance (cPanel, no SSH)
 
-For taking this from a local machine to the live cPanel host. Follow it in order; each
-step assumes the previous one succeeded.
+For taking this from a local machine to the live cPanel host **without shell access**. The
+host has no SSH and no Terminal, so every step below happens through cPanel's GUI, GitHub
+Actions, or FTP.
 
-> **Read this whole page before starting.** Steps 3, 5 and 7 are where a mistake costs
-> data or breaks the punch screen for every employee at once.
+> **Read this whole page before starting.** Steps 3, 5 and 7 are where a mistake costs data
+> or breaks the punch screen for every employee at once.
 
-This app is deployed **before** the ordering system, on its own subdomain with its own
-database. That is deliberate: Attendance owns a working login and never calls the
-ordering system, so it can go live and stay live whether or not the ordering system is
-ready. See `docs/sso.md`.
+---
+
+## Why no shell changes the approach
+
+Three things normally done with `php artisan` cannot be run:
+
+```
+php artisan key:generate       → done by attendance:install
+php artisan migrate --force    → done by attendance:install / attendance:deploy
+php artisan db:seed --force    → done by attendance:install --seed
+```
+
+Those are wrapped in two commands triggered from cPanel's Cron Jobs GUI. Everything else —
+installing dependencies, building the frontend — happens on GitHub's runners and arrives as
+finished files.
+
+**Git is used for the code, but never cloned onto the server.** `vendor/` and
+`public/build` are both gitignored (correctly), so a clone on the server would give source
+code with no dependencies and no compiled frontend: a blank page. GitHub Actions builds
+them and uploads everything over FTPS.
+
+> **Do not use cPanel's Git™ Version Control for this app.** It clones the repository but
+> cannot install Composer dependencies or build the frontend, and `.cpanel.yml` needs shell
+> execution the host does not provide. You would get code that does not run.
 
 ---
 
 ## Target
 
 ```
-Subdomain      attendance.darscoffee.com   (own SSL via AutoSSL)
-Document root  ~/attendance/public         — NOT the project root
-Database       own MySQL database, own user — NOT shared with ordering
+Domain         darscoffee.com  (or a subdomain — see step 2)
+FTP host       ftp.mwstay.com        port 21 (explicit FTPS)
+FTP user       darscoffeeeftipi@darscoffee.com
+App directory  /home/mwstayco/darscoffee.com/<your-directory>
+Document root  <app-directory>/public      ← NOT the app directory itself
+Database       own MySQL database + user, NOT shared with the ordering system
 Cron           php artisan schedule:run    every minute
 Timezone       store UTC, display Asia/Kuala_Lumpur
 ```
 
-Every phase from 3 onward is independently deployable. **Phase 3 was the deploy point**;
-Phases 4–7 are all built and deployed together.
+---
+
+## 1. ⚠️ The document root — do this first
+
+**Laravel must be served from its `public/` subfolder.** If the app directory itself is the
+web root, then `.env` — which holds your database password and `APP_KEY` — is downloadable
+by anyone at `https://your-domain/.env`.
+
+`APP_KEY` decrypts the employee IC numbers. If it leaks, that data is compromised; if it is
+lost, it is unreadable for ever.
+
+In cPanel → **Domains**, set the document root to the `public` folder inside your app
+directory. If cPanel will not let you (some hosts fix the root to `public_html`), use
+step 8.
+
+**The test, which you must actually run:** once Step 5 is done, browse to
+`https://your-domain/.env`.
+
+- **403 or 404** → correct, carry on.
+- **You can read it** → **stop.** Rename the file, fix the document root, then rotate your
+  database password and `APP_KEY`, because both were exposed.
+
+Also check `https://your-domain/storage/logs/laravel.log`. Same expectation.
 
 ---
 
-## What you need ready
+## 2. Create the database
 
-| Item | Where to get it |
-|---|---|
-| cPanel login with SSH or Terminal access | Your hosting provider |
-| Domain + SSL certificate | `AutoSSL` in cPanel is fine |
-| MySQL database + user | cPanel → MySQL® Databases |
+cPanel → **MySQL® Databases**:
 
-**Decide one thing before you start:** does this host terminate HTTPS itself, or is there a
-proxy or CDN in front? If in front — Cloudflare, or a host whose TLS is terminated upstream
-— you must set `TRUSTED_PROXIES`. Step 3 explains what goes wrong otherwise, and it is the
-single most likely thing to break on this deploy.
+1. Create a database. cPanel prefixes it with your account name, e.g. `mwstayco_attendance`.
+2. Create a user.
+3. **Add the user to the database** with ALL PRIVILEGES.
+
+Write down the full database name, the full username, and the password. The names are
+prefixed — `.env` needs the complete values, not what you typed in the box.
 
 ---
 
-## 1. Upload the code
+## 3. Upload `.env`
 
-Preferred: deploy with Git rather than dragging files up.
+`.env` is **not in the repository** (it holds secrets), so it is uploaded once by hand and
+never touched by deploys — the deploy config explicitly excludes it, or it would be deleted
+on the first run.
 
-```bash
-cd ~
-git clone https://github.com/mohdmuslin/darscoffee-attendance.git attendance
-```
-
-Point the subdomain's document root at **`attendance/public`** — not at the project root.
-If you cannot change the document root, see step 8.
-
----
-
-## 2. Install PHP dependencies
-
-```bash
-cd ~/attendance
-composer install --no-dev --optimize-autoloader
-```
-
-`--no-dev` keeps PHPUnit, Pest and Pint off the server.
-
-Confirm PHP is 8.3 or newer (`php -v`). Laravel 13 will not run on 8.2.
-
----
-
-## 3. Configure the environment
-
-```bash
-cp .env.example .env
-php artisan key:generate
-```
-
-Then edit `.env`:
+Create `.env` **in the app directory** via cPanel → **File Manager** → New File, then edit it:
 
 ```ini
 APP_NAME="Dars Attendance"
 APP_ENV=production
 APP_DEBUG=false
-APP_URL=https://attendance.darscoffee.com
+APP_KEY=
+APP_URL=https://your-domain
 
 DB_CONNECTION=mysql
-DB_DATABASE=your_db
-DB_USERNAME=your_user
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=mwstayco_attendance
+DB_USERNAME=mwstayco_attendance
 DB_PASSWORD=...
 
 SESSION_DRIVER=database
 CACHE_STORE=database
 QUEUE_CONNECTION=sync
+FILESYSTEM_DISK=local
 
 ATTENDANCE_TIMEZONE=Asia/Kuala_Lumpur
 
 # Only if a proxy or CDN sits in front of this host — see below.
-TRUSTED_PROXIES=*
+# TRUSTED_PROXIES=*
 ```
+
+Leave `APP_KEY` empty — `attendance:install` fills it in.
 
 ### ⚠️ `APP_DEBUG=false` is not optional
 
 With debug on, any error page prints database credentials and environment values to
-whoever triggers it. The deploy check treats this as a hard failure.
+whoever triggers it.
 
-### ⚠️ `TRUSTED_PROXIES` — the one that breaks photographs
+### ⚠️ `TRUSTED_PROXIES` — the setting that breaks every photograph
 
-If a proxy terminates TLS, PHP receives a **plain HTTP** request carrying
-`X-Forwarded-Proto: https`. Laravel trusts no proxies by default, so it believes the
-request is insecure. Photograph URLs are then generated over `http://`, redirect to
-`https://`, and **fail signature validation**, because the signature is checked against
-the request's scheme.
+If a proxy or CDN (Cloudflare, or a host terminating TLS upstream) sits in front, PHP
+receives a **plain HTTP** request carrying `X-Forwarded-Proto: https`. Laravel trusts no
+proxies by default, so it believes the request is insecure. Photograph URLs are then
+generated over `http://`, redirect to `https://`, and **fail signature validation**,
+because the signature is checked against the request's scheme.
 
-The result is a specific and misleading symptom:
+The symptom is specific and misleading:
 
-> The console loads. The API works. **Every staff photograph returns 403.**
+> **The console loads. The API works. Every staff photograph returns 403.**
 
 The obvious suspects are the signed-URL expiry and the file permissions. Neither is the
-cause. Set `TRUSTED_PROXIES=*` (or the provider's CIDR range) and the photographs appear.
+cause. Set `TRUSTED_PROXIES=*` and they appear.
 
-**Do not "fix" this with `URL::forceScheme('https')`.** That makes it worse: the URL is
-then generated as HTTPS while the request still reports HTTP, so validation fails
-immediately.
+**Do not try to fix this with `URL::forceScheme('https')`** — it makes it worse: the URL is
+generated as HTTPS while the request still reports HTTP, so validation fails immediately.
 
-### ⚠️ On a cached config, `.env` is not enough
+### ⚠️ If config is cached, `.env` is not read
 
-`TRUSTED_PROXIES` is read in `bootstrap/app.php`, which runs **before** the config
-repository is bound — `config()` there throws and takes the whole app down, so the value
-comes from the environment directly.
-
-If you run `php artisan config:cache`, `.env` is **not read on requests at all**. The
-value must then exist in the real environment — the PHP-FPM pool and the cron entry, not
-just `.env`. This is the most common cause of "I changed the setting and nothing
-happened."
-
-**File permissions:**
-
-```bash
-chmod -R 775 storage bootstrap/cache
-```
+`attendance:deploy` deliberately does **not** run `config:cache`. On this host the setting
+that matters (`TRUSTED_PROXIES`) is read before the config repository is even bound, and a
+stale config cache is the most common cause of "I changed the setting and nothing
+happened". The performance gain is not worth that trap at this scale.
 
 ---
 
-## 4. Build the frontend
+## 4. First deploy
 
-Either build locally and upload `public/build`, or build on the server:
+GitHub → **Settings → Secrets and variables → Actions** → add three repository secrets:
 
-```bash
-npm ci
-npm run build
-```
+| Name | Value |
+|---|---|
+| `FTP_SERVER` | `ftp.mwstay.com` |
+| `FTP_USERNAME` | `darscoffeeeftipi@darscoffee.com` |
+| `FTP_PASSWORD` | *(your FTP password)* |
 
-The app shows a blank page without these assets, because the Blade views load them via
-`@vite`.
+Then trigger the workflow: **Actions → Deploy to cPanel → Run workflow**. Or push any
+commit to `main`.
 
----
+It will:
 
-## 5. Database and tables
+1. **Wait for the CI tests to pass on that commit** — a broken commit must not reach staff,
+   and this application's failures are silent ones.
+2. Install dependencies and build the frontend on Linux.
+3. Upload over **FTPS** (encrypted).
 
-```bash
-php artisan migrate --force
-php artisan db:seed --force
-```
+The first run transfers roughly 10,000 files and takes several minutes. Later deploys send
+only what changed and take seconds, because the action keeps a state file.
 
-The seeders create the 3 outlets (`SG-RAMAL`, `SEDAP-SANTAI`, `DARS-COFFEE`), one owner,
-and Siti Fatimah as a manager mapped to all three outlets.
+### ⚠️ Point the workflow at your directory
 
-> ⚠️ **Change both passwords immediately.** The seeded credentials are
-> `owner@darscoffee.com` and `fatimahbokhare@gmail.com` with the password `password` — and
-> they are published in this repository. Anyone who has seen the repo can sign in and read
-> every staff member's hours until you change them.
->
-> The deploy check reports these as a **failure** until the accounts are removed or their
-> passwords changed. Sign in, change them under **Accounts**, then re-run the check.
-
-### The `APP_KEY` is not replaceable
-
-`APP_KEY` encrypts employee IC numbers. Restoring a database dump onto a server with a
-**different** `APP_KEY` makes those values permanently unreadable — the console shows a
-masked number that cannot be revealed. If you are restoring, restore `.env` with it.
+`server-dir` in `.github/workflows/deploy.yml` is set to `./`. Change it to your app
+directory if the FTP account lands anywhere other than the application root — check by
+connecting and looking at where you are placed.
 
 ---
 
-## 6. Scheduled work — required
+## 5. Install — the one manual step
 
-Two jobs run on a schedule, and both fail silently without cron.
-
-cPanel → **Cron Jobs** → add, every minute:
+The database has no tables yet. cPanel → **Cron Jobs** → add a job, running **once**
+(`* * * * *` is fine for a single manual run):
 
 ```
-* * * * * cd /home/USER/attendance && /usr/local/bin/php artisan schedule:run >> /dev/null 2>&1
+/usr/local/bin/php /home/mwstayco/darscoffee.com/<your-directory>/artisan attendance:install --seed
 ```
 
-Replace `USER` and the PHP path with your own (`which php`).
+Use the real PHP path for your host — check cPanel's **Select PHP Version** page, or ask
+support. A wrong path makes cron fail silently; nothing appears in the app's logs.
+
+Wait one minute, then:
+
+1. **Delete that cron job.** Leaving it would re-run the installer.
+2. Check `storage/logs/laravel.log` — it should show the install output.
+
+`--seed` creates the 3 outlets (`SG-RAMAL`, `SEDAP-SANTAI`, `DARS-COFFEE`), the owner
+account, and Siti Fatimah as a manager mapped to all three outlets.
+
+> ⚠️ **Change both passwords immediately.** They are `owner@darscoffee.com` and
+> `fatimahbokhare@gmail.com`, both with the password `password` — published in this
+> repository. Anyone who has seen it can sign in and read every staff member's hours.
+> The deploy check fails until this is done.
+
+If the install logs an error about the database, re-read step 2 — the most common cause is
+a database name or user that was not prefixed with the cPanel account name.
+
+---
+
+## 6. Cron — required, permanent
+
+Two jobs run on a schedule, and both fail silently without cron. cPanel → **Cron Jobs**,
+every minute:
+
+```
+* * * * * cd /home/mwstayco/darscoffee.com/<your-directory> && /usr/local/bin/php artisan schedule:run >> /dev/null 2>&1
+```
 
 | Job | Frequency | What breaks without it |
 |---|---|---|
-| `attendance:flag-open-segments` | hourly | A forgotten clock-out is never flagged — **and that employee cannot clock in again at all** (see below) |
+| `attendance:flag-open-segments` | hourly | A forgotten clock-out is never flagged — **and that employee cannot clock in again at all** |
 | `attendance:purge-photos` | daily 03:00 | Photographs are kept past the retention window — a PDPA compliance gap nobody notices |
 
 **The forgotten clock-out job matters more than it sounds.** The database allows only one
 open segment per employee, so someone who forgets to clock out cannot clock in the next
 morning: they scan, enter their PIN, press the button, and **nothing happens**, with no
-error shown. Nobody at the counter can see why. This job is what surfaces it.
+error shown. Nobody at the counter can see why.
 
-The retention purge runs at 03:00 in the **business** timezone. That is not decoration:
-the application runs in UTC, so a naive 03:00 would fire at 11am in Kuala Lumpur, deleting
+The retention purge runs at 03:00 in the **business** timezone. That is not decoration: the
+application runs in UTC, so a naive 03:00 would fire at 11am in Kuala Lumpur, deleting
 photographs while the console is in use.
-
-**Verify it is running.** After a few minutes:
-
-```bash
-php artisan schedule:list
-```
 
 ---
 
-## 7. Pre-flight check
+## 7. Applying future changes
 
-**Run this before telling staff to use the site.**
+Once installed, a release is: **push to `main`**, wait for the deploy, then — **only if the
+release included a migration** — apply it.
 
-```bash
-php artisan attendance:deploy-check
+### Applying migrations with no shell
+
+**Option A — one-off cron job.** The simplest, and fine if releases are occasional:
+
+```
+/usr/local/bin/php /home/mwstayco/darscoffee.com/<your-directory>/artisan attendance:deploy
 ```
 
-It reports each setting, and exits non-zero if anything is wrong. Every item is a
-misconfiguration that produces a *working-looking* application with one thing quietly
-broken — which is why they are checked rather than assumed.
+Wait a minute, then delete the job.
 
-| Check | Why it matters |
+**Option B — permanent flag-watching cron job.** For regular releases, add one more
+permanent entry that does nothing until a flag appears:
+
+```
+* * * * * cd /home/mwstayco/darscoffee.com/<your-directory> && /usr/local/bin/php artisan attendance:deploy --if-flagged >> /dev/null 2>&1
+```
+
+Then a release is:
+
+1. Push to `main` and let the deploy finish.
+2. Create an empty file at `storage/app/private/deploy.flag` (File Manager → New File).
+3. Within a few minutes the cron entry applies it and **removes the flag**, which is how
+   you know it ran.
+
+The flag is deliberately a file rather than a web endpoint: it exists outside the web root,
+needs no credentials, and adds nothing reachable from the internet. A deploy endpoint is the
+usual approach on hosts like this, but it would be a permanently reachable URL whose worst
+case is arbitrary database work — on a host where the punch endpoint is already public.
+
+### What `attendance:deploy` refuses to do, and why
+
+| Refused | Because |
 |---|---|
-| `APP_ENV` / `APP_DEBUG` | Debug on leaks credentials in error pages |
-| `APP_KEY` | Missing means IC numbers cannot be decrypted |
-| `APP_URL` | Must be https, or signed photo URLs fail validation |
-| `QUEUE_CONNECTION` | Must be `sync` — there is no worker, so a queued job never runs |
-| `CACHE_STORE` | Redis is not available on this host |
-| Database + migrations | A missed `migrate --force` fails on the first request touching a new column |
-| Photo storage path | Must be **outside** the web root, or every photograph is public |
-| Photo storage writable | Otherwise every punch with a photo fails |
-| `TRUSTED_PROXIES` | Warns, because "correctly unset" and "wrongly unset" look identical |
-| Signed URL scheme | The photograph-403 check |
-| Config cached | Changes how `.env` values must be supplied |
-| Seeded accounts | Fails while the published default passwords could still be in use |
-| Server clock | A drifting server mis-stamps every punch |
-
-It reports rather than repairs. A command that silently rewrites a production
-configuration is one nobody trusts twice.
-
-### The checks it cannot make
-
-- **Whether cron is installed.** It cannot read the crontab. Verify step 6 separately —
-  reporting "cron is fine" from inside the application would be a lie, and the
-  consequences are described above.
-- **Whether the host clock is correct.** It prints the server time for you to compare.
-- **Whether HTTPS actually works from a phone.** See step 9.
+| `migrate:fresh` | Drops every table and takes the attendance history with it. Not offered as an option even — the one time somebody reaches for it "to fix things" is the time it matters. |
+| `key:generate` | **`APP_KEY` decrypts the employee IC numbers.** Regenerating it makes every stored IC permanently unreadable, and the damage is silent: the console shows a number that can never be revealed. |
+| `db:seed` | It is idempotent, which is exactly the problem — it would RECREATE the published default accounts after you had deleted them. Re-running it on each deploy would quietly re-open a hole you closed. |
 
 ---
 
@@ -264,19 +289,19 @@ Some shared hosts only serve from `public_html`. Put the app outside the web roo
 forward only its `public` folder:
 
 ```
-/home/USER/attendance/        ← the app, NOT web-accessible
-/home/USER/public_html/       ← document root
+/home/mwstayco/darscoffee.com/<dir>/          ← the app, NOT web-accessible
+/home/mwstayco/public_html/                   ← document root
 ```
 
-Copy `attendance/public/*` into `public_html/`, then edit `public_html/index.php`:
+Copy `<dir>/public/*` into `public_html/`, then edit `public_html/index.php`:
 
 ```php
-require __DIR__.'/../attendance/vendor/autoload.php';
-$app = require_once __DIR__.'/../attendance/bootstrap/app.php';
+require __DIR__.'/../darscoffee.com/<dir>/vendor/autoload.php';
+$app = require_once __DIR__.'/../darscoffee.com/<dir>/bootstrap/app.php';
 ```
 
-**Test that `/.env` and `/storage` are not reachable** by browsing to them. If either
-loads, stop and fix it before going further.
+Adjust the paths to your layout. **Then re-run the step 1 test** — browse to `/.env` and
+confirm it is not readable.
 
 ---
 
@@ -286,84 +311,85 @@ Run these on the live site before staff use it.
 
 | # | Check | Expected |
 |---|---|---|
-| 1 | `https://attendance.darscoffee.com/console` | Console loads over HTTPS; sign in as the owner |
-| 2 | Change both seeded passwords | Then re-run `attendance:deploy-check` — no seeded-account failures |
-| 3 | Browse to `/.env` | **403 or 404** — never the file contents |
-| 4 | Browse to `/storage/logs/laravel.log` | **403 or 404** |
+| 1 | Browse to `/.env` | **403 or 404** — never the file contents |
+| 2 | Browse to `/storage/logs/laravel.log` | **403 or 404** |
+| 3 | `https://your-domain/console` | Console loads; sign in as the owner |
+| 4 | Change both seeded passwords, then delete the default accounts | See step 5 |
 | 5 | **Employees** → open one with a photo | **The photograph renders.** This is the `TRUSTED_PROXIES` check |
 | 6 | **Outlets & codes** → print a code | QR renders and prints |
 | 7 | Scan that printed code with a real phone | Punch screen opens; PIN accepted; photo taken |
-| 8 | Clock in, take a break, clock out | Timesheet shows the correct hours |
-| 9 | Set the phone to aeroplane mode and clock out | "Saved on this phone" message appears, not "not recorded" |
-| 10 | Turn the connection back on | The queued punch syncs; timesheet shows the time you actually punched |
+| 8 | Clock in, take a break, clock out | Timesheet shows correct hours |
+| 9 | Set the phone to aeroplane mode and clock out | "Saved on this phone" appears, not "not recorded" |
+| 10 | Turn the connection back on | The queued punch syncs, and the timesheet shows the time you actually punched |
 | 11 | **Anomalies** | The offline punch is listed as `Synced from offline` |
-| 12 | `php artisan schedule:list` | Both jobs listed |
-| 13 | Leave for an hour, then check `storage/logs` | No repeating errors |
+| 12 | Leave for an hour, then check `storage/logs` | No repeating errors |
 
-> **Check 5 is the one that catches the proxy problem**, and it is worth doing twice — once
-> on wifi and once on mobile data. A CDN or proxy can treat the two differently.
+> **Check 5 is the one that catches the proxy problem**, and it is worth doing twice — once on
+> wifi and once on mobile data. A CDN or proxy can treat the two differently.
 
 ---
 
-## 10. Ongoing
+## 10. Backups
 
-```bash
-php artisan attendance:deploy-check        # after any .env change
-php artisan attendance:purge-photos --dry-run   # preview the retention purge
-php artisan schedule:list                  # confirm scheduled work
-php artisan config:clear                   # after editing .env if config is cached
-```
-
-### Backups
-
-**A database dump is only half the backup.** Photographs are FILES, not rows: a
+**A database dump is only half the backup.** The photographs are FILES, not rows: a
 database-only restore gives you a system that references hundreds of staff photographs and
 can serve none of them — every timesheet showing a broken image, and no evidence to settle
-a dispute, which is the only reason the photographs are collected.
+a dispute, which is the only reason they are collected.
 
-```bash
-mysqldump your_db > backup.sql        # the records
-tar czf photos.tar.gz storage/app/private   # the photographs
-php artisan attendance:deploy-check   # prints the file counts as a reminder
-```
+In cPanel:
 
-The drill script (`scripts/dev-backup-drill.php`) dumps, restores into a scratch database,
-and compares row counts per table. It is guarded to refuse outside a local environment
-because it creates and drops databases — run it on a copy, not on the live host.
+- **Backup Wizard** → download a *Home Directory* backup (includes `storage/`) **and** a
+  *MySQL Databases* backup.
+- Or, if your host provides it, set up scheduled backups.
 
-> **A backup that has never been restored is not a backup; it is a file.** Restore one into
-> a scratch database before you need it in anger.
+> **A backup that has never been restored is not a backup; it is a file.** Restore one into a
+> scratch database before you need it in anger.
+
+The deploy never deletes photographs — `storage/app/private/**` is in the workflow's
+`exclude` list precisely so the FTP action's reconciliation cannot remove them.
 
 ---
 
 ## Rollback
 
-```bash
-git log --oneline -10          # find the last good commit
-git checkout <commit>
-composer install --no-dev --optimize-autoloader
-php artisan config:clear && php artisan route:clear && php artisan view:clear
-php artisan attendance:deploy-check
+Push a revert to `main`:
+
+```
+git revert <bad-commit>
+git push origin main
 ```
 
-Do **not** use `migrate:rollback` on a live site once punches exist — it drops tables and
-takes the attendance history with them. Restore from a database backup instead.
+The workflow redeploys. If the bad release included a migration, restore the database from a
+backup instead — **do not** try to roll migrations back on a live site once punches exist,
+because the down-migrations drop tables.
+
+`APP_KEY` is not in git and is never touched by a deploy, so it survives a rollback.
 
 ---
 
 ## The development scripts are guarded
 
-`scripts/` contains helpers that **delete data** — `dev-reset-punches.php` removes an
-employee's time entries, `dev-seed-*.php` clear ranges before reseeding,
-`dev-delete-employee.php` force-deletes a record. They are committed, so they are present
-on the server after a deploy.
+`scripts/` contains helpers that **delete data**. They are committed, so they exist on the
+server after a deploy — but they refuse to run unless `APP_ENV` is `local` or `testing`.
 
-They refuse to run unless `APP_ENV` is `local` or `testing`. `dev-test-mysql.php` is the
-most dangerous of them and the reason the guard exists: it **rewrites `.env`** to point at
-a scratch database, runs the suite, and restores it. Interrupted halfway it would leave the
-**live application pointed at an empty scratch database** — staff would scan the code the
-next morning and be told their PIN does not match, with nothing in the application's logs
-to explain it.
+`dev-test-mysql.php` is the most dangerous of them and the reason the guard exists: it
+**rewrites `.env`** to point at a scratch database. Interrupted halfway, it would leave the
+live application pointed at an empty database — staff would scan the code the next morning
+and be told their PIN does not match, with nothing in the logs to explain it.
 
-The guard reads `.env` directly, because it runs before the framework boots. It fails
-closed: an unreadable `.env` is treated as production.
+The deploy workflow also excludes `scripts/` entirely, so they are not on the server at all.
+The guard is the second line of defence.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| Blank page | `public/build` missing — the frontend did not build. Check the workflow log. |
+| "View path not found" | `storage/framework/views` missing. Run `attendance:deploy`; it recreates the tree. |
+| Photographs 403, everything else works | `TRUSTED_PROXIES` not set. See step 3. |
+| "No application encryption key" | `APP_KEY` empty and `attendance:install` has not run. |
+| Database connection refused | Wrong name, user, or password in `.env`; or the user was not added to the database. |
+| Cron does nothing | Wrong PHP path. Check cPanel → Select PHP Version, or ask support. |
+| 500 on every page | Read `storage/logs/laravel.log` — the real error is there, not on screen (debug is off, correctly). |

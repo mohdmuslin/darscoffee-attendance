@@ -1,0 +1,191 @@
+name: Deploy to cPanel
+
+# WHY THIS RUNS ON GITHUB RATHER THAN BEING UPLOADED BY HAND
+#
+# The target host has no SSH and no Terminal, so anything the server needs must arrive as
+# finished files. Building here means the artifacts are produced on Linux by a recorded,
+# repeatable process, rather than being whatever happened to be on somebody's Windows PC that
+# day — which is how a deploy quietly ships a half-built frontend.
+#
+# It also makes `vendor/` and `public/build` non-issues: both are gitignored, so a plain clone
+# on the server would give source code and a broken application.
+
+on:
+  # Deploys only from main, and only after the CI workflow is green on that commit.
+  push:
+    branches: [main]
+
+  # Lets you redeploy without an empty commit, if a transfer fails halfway.
+  workflow_dispatch:
+
+# Two pushes in quick succession must not race, or they interleave transfers and leave a
+# mixture of both revisions on the server. The older run is cancelled; the newer one wins.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # Only ever deploy the branch that is production.
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------
+      # Wait for CI on this commit.
+      #
+      # Deploying before the tests pass puts a broken commit in front of staff, and this
+      # application's failures are silent: a wrong total, a photograph that never appears, a
+      # clock-out recorded at the wrong time. None of them raise anything anybody would see.
+      # So the deploy refuses to start until CI is green on this exact commit.
+      # ---------------------------------------------------------------
+      - name: Wait for tests to pass
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: test
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 20
+          # Generous: the suite runs twice, once per database driver, plus the migration job.
+          allowed-conclusions: success
+          verbose: true
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          # Only what the APPLICATION needs at runtime. Deliberately no `gd`: it is used by the
+          # PWA icon generator, which is a local script and not part of a deploy.
+          extensions: mbstring, intl, pdo_mysql, curl, zip, fileinfo
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install PHP dependencies
+        run: composer install --no-dev --prefer-dist --no-interaction --no-progress --optimize-autoloader
+
+      - name: Install and build frontend
+        run: |
+          npm ci
+          npm run build
+
+      # ---------------------------------------------------------------
+      # Sanity checks, before anything is transferred.
+      #
+      # If the build silently produced nothing, the deploy would still "succeed" and the site
+      # would render a blank page — because the Blade views load their assets through @vite and
+      # a missing manifest is not a build error. Asserting it here makes the failure cheap and
+      # the message clear, instead of it surfacing as a white screen on the live site.
+      # ---------------------------------------------------------------
+      - name: Verify the artifacts exist
+        run: |
+          if [ ! -f public/build/manifest.json ]; then
+            echo "::error::public/build/manifest.json is missing — the frontend did not build, and the site would render blank."
+            exit 1
+          fi
+
+          if [ ! -f vendor/autoload.php ]; then
+            echo "::error::vendor/autoload.php is missing — the application would fatal on the first request."
+            exit 1
+          fi
+
+          echo "Build manifest present; $(find public/build -type f | wc -l) asset(s)."
+          echo "vendor present; $(find vendor -type f | wc -l) file(s)."
+
+      # ---------------------------------------------------------------
+      # Upload.
+      #
+      # FTPS (explicit), not plain FTP: the source and the whole vendor tree go over the wire,
+      # and this host offers TLS on port 21. `security: loose` tolerates the self-signed
+      # certificate these hosts typically present — the transfer is still encrypted, which is
+      # the point; it is not certificate-verified, which cannot be fixed from here.
+      #
+      # The action keeps a state file, so only CHANGED files are sent after the first run. The
+      # first deploy moves roughly 10,000 files and takes a while; later ones take seconds.
+      # ---------------------------------------------------------------
+      - name: Deploy over FTPS
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          security: loose
+          local-dir: ./
+          server-dir: ./
+
+          # ---------------------------------------------------------------
+          # THE MOST IMPORTANT PART OF THIS FILE.
+          #
+          # `exclude` does two jobs: it keeps junk off the server, and — because the action
+          # DELETES remote files that are not in the local tree — it protects server state that
+          # exists nowhere else. Getting this wrong on the first run is unrecoverable.
+          #
+          #   .env                  database password and APP_KEY. Never in the repository, so
+          #                         without this the deploy would delete it and the site would
+          #                         500. Worse, APP_KEY decrypts the employee IC numbers:
+          #                         losing it makes them unreadable for ever.
+          #
+          #   storage/app/private   the PHOTOGRAPHS — every punch image, stored as files
+          #                         outside the web root. Irreplaceable: they are the evidence
+          #                         that settles a dispute, and no database backup contains
+          #                         them. Also holds the deploy flag.
+          #
+          #   storage/framework     sessions, compiled views, cache — server state.
+          #   storage/logs          the log files.
+          #
+          # A NOTE ON THE STORAGE DIRECTORY TREE. Excluding these paths means the empty
+          # directories are not uploaded either, so a fresh server would have no
+          # `storage/framework/views` — and the application then dies with "View path not
+          # found", a message that points at views rather than at a missing folder. That was
+          # reproduced locally before writing this.
+          #
+          # It is handled in CODE rather than with glob rules: `attendance:install` and
+          # `attendance:deploy` both create the tree when it is absent. Expressing it with `!`
+          # negation patterns would depend on this action's exact glob semantics, and relying
+          # on an untested assumption for something that breaks the whole site on a fresh
+          # install is not a trade worth making.
+          # ---------------------------------------------------------------
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            **/.env
+            **/.env.*
+            **/tests/**
+            **/scripts/**
+            **/docs/**
+            **/.github/**
+            **/*.md
+            phpunit.xml
+            .editorconfig
+            .gitattributes
+            .gitignore
+            .npmrc
+            package-lock.json
+            package.json
+            vite.config.js
+            storage/app/private/**
+            storage/app/*.sqlite*
+            storage/logs/**
+            storage/framework/**
+
+      - name: Report
+        run: |
+          {
+            echo "### Deployed"
+            echo ""
+            echo "Commit \`${{ github.sha }}\` uploaded over FTPS."
+            echo ""
+            echo "**If this deploy included a migration, it has NOT been applied yet.**"
+            echo ""
+            echo "See \`docs/deployment.md\` — drop the deploy flag, and the cron entry applies it."
+          } >> $GITHUB_STEP_SUMMARY
