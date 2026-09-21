@@ -43,6 +43,8 @@ FTP user       darscoffeeeftipi@darscoffee.com
 App directory  /home/mwstayco/darscoffee.com/attendance
 Document root  /home/mwstayco/darscoffee.com/attendance/public   ← NOT the app directory
 Database       own MySQL database + user, NOT shared with the ordering system
+Cron           php artisan schedule:run    every minute
+Timezone       store UTC, display Asia/Kuala_Lumpur
 ```
 
 > **The transport is plain, unencrypted FTP, and the host is why.** It offers FTPS, and the
@@ -52,9 +54,6 @@ Database       own MySQL database + user, NOT shared with the ordering system
 > **Step 4** for the full evidence. The mitigation is that `.env` is excluded from the
 > upload, so no database password, app key or staff photograph ever crosses the wire —
 > only source code and a build artifact.
-Cron           php artisan schedule:run    every minute
-Timezone       store UTC, display Asia/Kuala_Lumpur
-```
 
 ---
 
