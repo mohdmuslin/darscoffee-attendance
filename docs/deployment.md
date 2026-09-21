@@ -193,8 +193,33 @@ what it would do without changing anything.
 
 4. Run the workflow again. That run transfers for real.
 
-The first real run moves roughly 10,000 files and takes several minutes. Later deploys send
-only what changed and take seconds, because the action keeps a state file.
+### Why `vendor/` arrives as a zip
+
+The first real upload moved **8,599 files in 62 minutes** and then died with a TLS error. That
+error named the wrong problem — it read like a certificate fault, and the cause was
+**duration**: about 2.3 files per second, on a server that drops idle connections after 10
+minutes. `vendor/` was 9,919 of the ~10,000 files.
+
+So `vendor/` is no longer uploaded file by file. It is a **build artifact** — Composer
+generates it from `composer.lock` — so the workflow packages it into a single `vendor.zip`, and
+you unpack it on the server. That turns ~10,000 transfers into about 250, which fits in one
+connection.
+
+Later deploys send only what changed, so they are fast.
+
+### ⚠️ After a deploy: unpack `vendor.zip`
+
+**Do this first — nothing runs without it, including the installer.**
+
+cPanel → **File Manager** → your app folder → right-click `vendor.zip` → **Extract** → into the
+**current directory** (the app folder, not a subfolder).
+
+The archive contains the `vendor` folder itself, so extracting it at the app root puts the files
+exactly where they belong. Leave `vendor.zip` in place afterwards — deleting it makes the next
+deploy slower, and it is excluded from the reconciliation so it does no harm.
+
+If you forget this step, every page returns a 500 and `storage/logs/laravel.log` says
+`Failed opening required '/home/.../vendor/autoload.php'`.
 
 ### ⚠️ Point the workflow at your directory
 
@@ -208,7 +233,12 @@ reason the rehearsal exists.
 ---
 
 ## 5. Install — the one manual step
+**Before this: confirm `vendor.zip` is unpacked.** Step 4 explains it. Nothing runs without it.
 
+If a previous upload died partway, `vendor/` on the server may be incomplete. **Delete that
+`vendor/` folder in File Manager and extract `vendor.zip` again** — a half-populated vendor
+tree produces confusing "class not found" errors rather than an obvious missing-dependency
+message, and it is worth thirty seconds to rule out.
 The database has no tables yet. cPanel → **Cron Jobs** → add a job, running **once**
 (`* * * * *` is fine for a single manual run):
 
