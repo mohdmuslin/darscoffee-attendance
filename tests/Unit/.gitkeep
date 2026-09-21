@@ -1,0 +1,13 @@
+The Unit test suite is declared but was not tracked.
+
+`phpunit.xml` and `tests/Pest.php` both declare a `Unit` suite pointing at this
+directory. It existed on the developer's machine but was EMPTY, and git cannot store
+an empty directory — so a fresh clone had no `tests/Unit`, Pest refused to start with
+"Test directory ... not found", and exited 2.
+
+That failed in under a second, on every CI run, from the very first commit. Because
+the deploy workflow waits for CI to pass before uploading anything, it meant no deploy
+ever reached FTP — a failure that looked like a credentials or path problem and was
+neither.
+
+This file is deliberately not empty, so the directory survives a clone.
