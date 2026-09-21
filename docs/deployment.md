@@ -26,7 +26,7 @@ finished files.
 **Git is used for the code, but never cloned onto the server.** `vendor/` and
 `public/build` are both gitignored (correctly), so a clone on the server would give source
 code with no dependencies and no compiled frontend: a blank page. GitHub Actions builds
-them and uploads everything over FTPS.
+them and uploads everything over FTP.
 
 > **Do not use cPanel's Git™ Version Control for this app.** It clones the repository but
 > cannot install Composer dependencies or build the frontend, and `.cpanel.yml` needs shell
@@ -37,12 +37,21 @@ them and uploads everything over FTPS.
 ## Target
 
 ```
-Domain         darscoffee.com  (or a subdomain — see step 2)
-FTP host       ftp.mwstay.com        port 21 (explicit FTPS)
+Domain         attendance.darscoffee.com  (subdomain, NOT the apex domain)
+FTP host       ftp.mwstay.com        port 21 (plain FTP — see below)
 FTP user       darscoffeeeftipi@darscoffee.com
-App directory  /home/mwstayco/darscoffee.com/<your-directory>
-Document root  <app-directory>/public      ← NOT the app directory itself
+App directory  /home/mwstayco/darscoffee.com/attendance
+Document root  /home/mwstayco/darscoffee.com/attendance/public   ← NOT the app directory
 Database       own MySQL database + user, NOT shared with the ordering system
+```
+
+> **The transport is plain, unencrypted FTP, and the host is why.** It offers FTPS, and the
+> TLS *control* connection works — but every TLS **data** connection fails with
+> `SSL alert number 50 (data socket)`, so no file can be transferred over FTPS at all. This
+> is a Node 24 / `basic-ftp` 5.x incompatibility, not a setting; see the note under
+> **Step 4** for the full evidence. The mitigation is that `.env` is excluded from the
+> upload, so no database password, app key or staff photograph ever crosses the wire —
+> only source code and a build artifact.
 Cron           php artisan schedule:run    every minute
 Timezone       store UTC, display Asia/Kuala_Lumpur
 ```
@@ -53,7 +62,7 @@ Timezone       store UTC, display Asia/Kuala_Lumpur
 
 **Laravel must be served from its `public/` subfolder.** If the app directory itself is the
 web root, then `.env` — which holds your database password and `APP_KEY` — is downloadable
-by anyone at `https://your-domain/.env`.
+by anyone at `https://attendance.darscoffee.com/.env`.
 
 `APP_KEY` decrypts the employee IC numbers. If it leaks, that data is compromised; if it is
 lost, it is unreadable for ever.
@@ -63,13 +72,13 @@ directory. If cPanel will not let you (some hosts fix the root to `public_html`)
 step 8.
 
 **The test, which you must actually run:** once Step 5 is done, browse to
-`https://your-domain/.env`.
+`https://attendance.darscoffee.com/.env`.
 
 - **403 or 404** → correct, carry on.
 - **You can read it** → **stop.** Rename the file, fix the document root, then rotate your
   database password and `APP_KEY`, because both were exposed.
 
-Also check `https://your-domain/storage/logs/laravel.log`. Same expectation.
+Also check `https://attendance.darscoffee.com/storage/logs/laravel.log`. Same expectation.
 
 ---
 
@@ -99,7 +108,7 @@ APP_NAME="Dars Attendance"
 APP_ENV=production
 APP_DEBUG=false
 APP_KEY=
-APP_URL=https://your-domain
+APP_URL=https://attendance.darscoffee.com
 
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
@@ -171,7 +180,7 @@ It will:
 1. **Wait for the CI tests to pass on that commit** — a broken commit must not reach staff,
    and this application's failures are silent ones.
 2. Install dependencies and build the frontend on Linux.
-3. Upload over **FTPS** (encrypted).
+3. Upload over **plain FTP**, with `.env` and `storage/` excluded.
 
 ### ⚠️ The first run is a rehearsal, on purpose
 
@@ -195,14 +204,48 @@ what it would do without changing anything.
 
 ### Why `vendor/` arrives as a zip
 
-The first real upload moved **8,599 files in 62 minutes** and then died with a TLS error. That
-error named the wrong problem — it read like a certificate fault, and the cause was
-**duration**: about 2.3 files per second, on a server that drops idle connections after 10
-minutes. `vendor/` was 9,919 of the ~10,000 files.
+`vendor/` is almost the entire deploy: **9,919 of the ~10,000 files**. It is a **build
+artifact** — Composer generates it from `composer.lock` — so the workflow packages it into a
+single `vendor.zip` and you unpack it on the server. That turns ~10,000 transfers into about
+250.
 
-So `vendor/` is no longer uploaded file by file. It is a **build artifact** — Composer
-generates it from `composer.lock` — so the workflow packages it into a single `vendor.zip`, and
-you unpack it on the server. That turns ~10,000 transfers into about 250, which fits in one
+> **Correction, because the first explanation here was wrong.** The original upload moved
+> 8,599 individual files over **62 minutes** and failed with a TLS error, and this document
+> blamed **duration** — 2.3 files/second against a server that drops idle connections. The
+> next run disproved it: with the zip in place, ~250 files transferred and it **failed
+> anyway, in 4 minutes**, with the identical error. Duration was never the cause.
+>
+> The zip is still worth keeping — it is far faster and far less likely to be interrupted —
+> but it is a speed improvement, **not** what fixed, or failed to fix, the deploy.
+
+### Why the upload is plain FTP and not FTPS
+
+Every TLS **data** connection fails:
+
+```
+Error: ...:tlsv1 alert decode error ... SSL alert number 50 (data socket)
+```
+
+Recorded so nobody has to rediscover it:
+
+- The **control** connection over TLS is fine — it authenticates and lists the tree. Only
+  the **data** channel fails.
+- The **rehearsal (dry-run) succeeds**. A dry run compares file listings and never transfers
+  contents, which is exactly why it passes while the real upload dies.
+- It is **not size, speed, or timeouts.** 8,599 files failed in 62 minutes; 250 files failed
+  in 4 minutes. Same error.
+- Every run logs `Node.js 20 is deprecated ... SamKirkland/FTP-Deploy-Action@v4.3.5 is being
+  forced to run on Node.js 24`. The action bundles `basic-ftp` 5.x, and Node 24.17 binds a
+  resumed TLS session to its original host (the fix for CVE-2026-48934), which broke FTPS
+  data connections. Upgrading to the newest release (v4.4.0) does **not** help — it still
+  depends on `basic-ftp ^5.0.5`. There is no action input that changes this.
+
+So FTPS from GitHub's runners to this host cannot be made to work by configuration. Plain
+FTP was **verified** to be permitted before switching: sending `USER` before `AUTH TLS` is
+answered `331 ... Password required`, meaning TLS is optional on this host rather than
+forced. If the host were ever reconfigured to require TLS, the deploy would fail immediately
+on authentication instead — an auth error in the log means stop and upload by hand with
+cPanel's File Manager.
 connection.
 
 Later deploys send only what changed, so they are fast.
@@ -239,11 +282,12 @@ If a previous upload died partway, `vendor/` on the server may be incomplete. **
 `vendor/` folder in File Manager and extract `vendor.zip` again** — a half-populated vendor
 tree produces confusing "class not found" errors rather than an obvious missing-dependency
 message, and it is worth thirty seconds to rule out.
+
 The database has no tables yet. cPanel → **Cron Jobs** → add a job, running **once**
 (`* * * * *` is fine for a single manual run):
 
 ```
-/usr/local/bin/php /home/mwstayco/darscoffee.com/<your-directory>/artisan attendance:install --seed
+/usr/local/bin/php /home/mwstayco/darscoffee.com/attendance/artisan attendance:install --seed
 ```
 
 Use the real PHP path for your host — check cPanel's **Select PHP Version** page, or ask
@@ -273,7 +317,7 @@ Two jobs run on a schedule, and both fail silently without cron. cPanel → **Cr
 every minute:
 
 ```
-* * * * * cd /home/mwstayco/darscoffee.com/<your-directory> && /usr/local/bin/php artisan schedule:run >> /dev/null 2>&1
+* * * * * cd /home/mwstayco/darscoffee.com/attendance && /usr/local/bin/php artisan schedule:run >> /dev/null 2>&1
 ```
 
 | Job | Frequency | What breaks without it |
@@ -302,7 +346,7 @@ release included a migration** — apply it.
 **Option A — one-off cron job.** The simplest, and fine if releases are occasional:
 
 ```
-/usr/local/bin/php /home/mwstayco/darscoffee.com/<your-directory>/artisan attendance:deploy
+/usr/local/bin/php /home/mwstayco/darscoffee.com/attendance/artisan attendance:deploy
 ```
 
 Wait a minute, then delete the job.
@@ -311,7 +355,7 @@ Wait a minute, then delete the job.
 permanent entry that does nothing until a flag appears:
 
 ```
-* * * * * cd /home/mwstayco/darscoffee.com/<your-directory> && /usr/local/bin/php artisan attendance:deploy --if-flagged >> /dev/null 2>&1
+* * * * * cd /home/mwstayco/darscoffee.com/attendance && /usr/local/bin/php artisan attendance:deploy --if-flagged >> /dev/null 2>&1
 ```
 
 Then a release is:
@@ -342,15 +386,15 @@ Some shared hosts only serve from `public_html`. Put the app outside the web roo
 forward only its `public` folder:
 
 ```
-/home/mwstayco/darscoffee.com/<dir>/          ← the app, NOT web-accessible
-/home/mwstayco/public_html/                   ← document root
+/home/mwstayco/darscoffee.com/attendance/          ← the app, NOT web-accessible
+/home/mwstayco/public_html/                       ← document root
 ```
 
-Copy `<dir>/public/*` into `public_html/`, then edit `public_html/index.php`:
+Copy `attendance/public/*` into `public_html/`, then edit `public_html/index.php`:
 
 ```php
-require __DIR__.'/../darscoffee.com/<dir>/vendor/autoload.php';
-$app = require_once __DIR__.'/../darscoffee.com/<dir>/bootstrap/app.php';
+require __DIR__.'/../darscoffee.com/attendance/vendor/autoload.php';
+$app = require_once __DIR__.'/../darscoffee.com/attendance/bootstrap/app.php';
 ```
 
 Adjust the paths to your layout. **Then re-run the step 1 test** — browse to `/.env` and
@@ -366,7 +410,7 @@ Run these on the live site before staff use it.
 |---|---|---|
 | 1 | Browse to `/.env` | **403 or 404** — never the file contents |
 | 2 | Browse to `/storage/logs/laravel.log` | **403 or 404** |
-| 3 | `https://your-domain/console` | Console loads; sign in as the owner |
+| 3 | `https://attendance.darscoffee.com/console` | Console loads; sign in as the owner |
 | 4 | Change both seeded passwords, then delete the default accounts | See step 5 |
 | 5 | **Employees** → open one with a photo | **The photograph renders.** This is the `TRUSTED_PROXIES` check |
 | 6 | **Outlets & codes** → print a code | QR renders and prints |

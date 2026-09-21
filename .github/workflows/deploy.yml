@@ -102,14 +102,18 @@ jobs:
       # ---------------------------------------------------------------
       # Package `vendor/` into ONE archive.
       #
-      # The first real upload moved 8,599 individual files in 62 minutes and then died with a
-      # TLS error. The message named the wrong problem — it read as a certificate fault, and
-      # the actual cause was DURATION: roughly 2.3 files per second, on a server that drops
-      # idle connections after 10 minutes, with `vendor/` accounting for 9,919 of ~10,000 files.
+      # `vendor/` is a BUILD ARTIFACT, not source — Composer generates it from `composer.lock`
+      # — and it is 9,919 of the ~10,000 files in a deploy. Shipping it as one archive turns
+      # ~10,000 transfers into roughly 250.
       #
-      # `vendor/` is a BUILD ARTIFACT, not source — Composer generates it from `composer.lock` —
-      # so it ships as one archive and is unpacked on the server. That turns ~10,000 transfers
-      # into roughly 250, which fits comfortably in one connection.
+      # HONEST NOTE ON WHY THIS EXISTS. The first real upload moved 8,599 individual files and
+      # died with a TLS error. I first read that as DURATION — 2.3 files/second against a
+      # server that drops idle connections — and recorded here that the archive was the fix.
+      # That was WRONG, and the next run proved it: with the archive in place the transfer
+      # shrank to ~250 files and it failed anyway, in 4 minutes instead of 62. Duration was
+      # never the cause; the archive is still worth keeping because it is far faster and
+      # far less likely to be interrupted, but it did NOT fix the failure. The real cause is
+      # on the data socket — see the note above `Deploy over FTP`.
       #
       # `-q` because the file list runs to thousands of lines and would bury everything else in
       # the log. The archive contains the `vendor/` directory itself, so extracting it at the
@@ -124,14 +128,53 @@ jobs:
       # ---------------------------------------------------------------
       # Upload.
       #
-      # FTPS (explicit), not plain FTP: this host runs Pure-FTPd advertising `AUTH TLS` on port
-      # 21. `security: loose` tolerates the self-signed certificate such hosts typically present
-      # — the transfer is still encrypted, which is the point; it is not certificate-verified,
-      # which cannot be fixed from here.
+      # PLAIN FTP, DELIBERATELY — NOT FTPS. This is a retreat, and here is why it is the
+      # right one.
       #
-      # `timeout` is raised from the 30-second default. A ~15 MB archive over a shared host's
-      # FTP can exceed that, and a timeout mid-file is what produced the misleading TLS error
-      # on the first attempt.
+      # WHAT ACTUALLY FAILS. The host offers explicit FTPS (Pure-FTPd, `AUTH TLS` on port 21)
+      # and the control connection works over TLS: it authenticates and it lists the remote
+      # tree. The failure is on the TLS DATA socket, during the file transfer:
+      #
+      #   SSL alert number 50 (data socket)
+      #
+      # EVIDENCE THAT IT IS NOT SIZE OR SPEED. The first real upload moved 8,599 files and
+      # failed after 62 minutes. It was then reduced to ~250 files and one 15 MB archive —
+      # and it failed in 4 MINUTES with the identical error. The rehearsal (dry-run) of the
+      # same workflow succeeds, because a dry run never transfers file contents. Transfer
+      # volume and duration are therefore eliminated as causes.
+      #
+      # THE MOST LIKELY CAUSE, AND WHY IT CANNOT BE CONFIGURED AWAY. These annotations
+      # appear on every run:
+      #
+      #   "Node.js 20 is deprecated. The following actions ... are being forced to run on
+      #    Node.js 24: ... SamKirkland/FTP-Deploy-Action@v4.3.5"
+      #
+      # This action bundles `basic-ftp` 5.x. Node 24.17 binds a resumed TLS session to the
+      # host it was authenticated for (the fix for CVE-2026-48934), which broke FTPS data
+      # connections in basic-ftp 5.x — hence the alert on the data socket only. basic-ftp
+      # only fixed it in 6.0.2, and the LATEST release of this action (v4.4.0) still depends
+      # on basic-ftp ^5.0.5, so upgrading the action does not help. There is no input on this
+      # action that changes how the TLS session is presented.
+      #
+      # CONCLUSION: FTPS from a GitHub-hosted runner to this host is not achievable by
+      # configuration. Either the transport changes or the deploy becomes manual.
+      #
+      # WHAT THIS COSTS, STATED PLAINLY. The FTP password and the transferred bytes now cross
+      # the network unencrypted. That is a real loss, not a technicality. It is accepted here
+      # because the payload is source code and a build artifact — public repository content
+      # plus a zip of Composer packages — and because `.env` is EXCLUDED, so the database
+      # password, the app key and the staff photographs are never in the transfer at all. The
+      # only credential exposed is one FTP account scoped to this application's directory.
+      #
+      # VERIFIED BEFORE RELYING ON IT: the host accepts a login without TLS. `USER` sent
+      # before `AUTH TLS` is answered `331 ... Password required`, so TLS is optional here
+      # rather than forced. A host that required TLS would answer with a refusal instead, and
+      # this step would fail IMMEDIATELY on authentication rather than part-way through a
+      # transfer. That distinction is visible in the log and is worth knowing: an auth error
+      # here means stop and upload by hand.
+      #
+      # `timeout` is raised from the 30-second default: a ~15 MB archive over a shared host's
+      # FTP can exceed it.
       #
       # SAFETY: THIS ACTION DELETES REMOTE FILES.
       #
@@ -146,15 +189,14 @@ jobs:
       #
       # Settings → Secrets and variables → Actions → Variables → New variable
       # ---------------------------------------------------------------
-      - name: Deploy over FTPS
+      - name: Deploy over FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ftps
+          protocol: ftp
           port: 21
-          security: loose
           timeout: 300000
           local-dir: ./
           server-dir: ./
