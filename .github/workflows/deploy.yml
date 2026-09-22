@@ -96,8 +96,19 @@ jobs:
             exit 1
           fi
 
+          # `public/index.php` is the FRONT CONTROLLER — the one file the web server actually
+          # executes. Without it the site answers 403 (directory listing denied) and nothing
+          # in the response says why. It went missing on the server once, on a deploy that
+          # reported success, so it is asserted here rather than assumed.
+          if [ ! -f public/index.php ]; then
+            echo "::error::public/index.php is missing — the web server has nothing to execute and the site returns 403."
+            exit 1
+          fi
+
           echo "Build manifest present; $(find public/build -type f | wc -l) asset(s)."
           echo "vendor present; $(find vendor -type f | wc -l) file(s)."
+          echo "public/ files:"
+          find public -maxdepth 1 -type f | sort
 
       # ---------------------------------------------------------------
       # Package `vendor/` into ONE archive.
@@ -198,6 +209,25 @@ jobs:
           protocol: ftp
           port: 21
           timeout: 300000
+
+          # ---------------------------------------------------------------
+          # STATE FILE — deliberately RENAMED to force one full re-check.
+          #
+          # This action keeps a state file ON THE SERVER recording which files it has already
+          # uploaded, and skips files listed there. Server state and this file move together,
+          # so when the application was relocated into the subdomain folder the stale record
+          # travelled with it and `public/index.php` was never re-uploaded — while every file
+          # beside it was present. The site then answered 403 with no explanation, because
+          # the directory had no front controller to execute.
+          #
+          # A new name means "nothing has been deployed yet", so every file is compared
+          # against the server afresh and anything missing is uploaded. The old state file is
+          # not in the local tree, so the reconciliation removes it in the same pass.
+          #
+          # It stays named this from now on: leaving the suffix is harmless, and changing it
+          # back would reintroduce the file that caused this.
+          # ---------------------------------------------------------------
+          state-name: .ftp-deploy-sync-state-v2.json
           local-dir: ./
           server-dir: ./
           dry-run: ${{ vars.FTP_DEPLOY_ENABLED != 'true' }}
