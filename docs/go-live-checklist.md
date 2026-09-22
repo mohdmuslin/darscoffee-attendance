@@ -1,61 +1,88 @@
 # Morning checklist — Dars Attendance go-live
 
-**State as of 3:45am, 22 Sept:** the deployment **works**. See "What changed" at the bottom
-if you want the why. You still have a short list of cPanel steps — nothing is broken, the
-site is just not pointed at the upload yet.
+**Where things stand (22 Sept, morning):**
 
-The whole list below is about 30 minutes, and steps 1–3 are the ones that matter.
+| | Status |
+|---|---|
+| The deploy pipeline | ✅ **Working** — three consecutive successful uploads |
+| The app files on the server | ✅ Moved to the subdomain folder |
+| Document root | ❌ Still serving an empty folder → "Index of /" |
+| `vendor.zip` | ❌ Not yet extracted |
+| Install / cron / passwords | ❌ Not yet done |
+
+The list below is about 30 minutes. **Steps 1–3 are the ones that matter** — until they are
+done, nothing else can work.
+
+### The layout that matters
+
+```
+/home/mwstayco/attendance.darscoffee.com/
+  public/            <- leftover empty folder. NOT the docroot.
+  attendance/        <- the Laravel application root
+    artisan   app/   bootstrap/   config/   storage/
+    .env             <- MUST live here (one only)
+    vendor.zip       <- extract into this folder
+    public/          <- DOCROOT: index.php + build/
+```
+
+App root: `/home/mwstayco/attendance.darscoffee.com/attendance`
 
 ---
 
-## 1. Confirm the upload landed (1 min)
+## 1. ⚠️ Set the document root (3 min) — the main remaining step
 
-GitHub → **Actions** → **Deploy to cPanel** → the newest run.
+`https://attendance.darscoffee.com/` shows **"Index of /"** with an empty list. That is not an
+error: the domain is serving an **empty folder** (`.../attendance.darscoffee.com/public`), which
+is not where the app is.
 
-It should be **green**, and `Deploy over FTP` should say it ran ~5 minutes.
-
-> **A green run does NOT mean the files are visible yet.** The workflow only *stores* files;
-> cPanel decides which folder the domain serves. Step 3 is what makes them visible.
-
-## 2. Unpack `vendor.zip` (2 min)
-
-`vendor/` ships as one archive because uploading ~10,000 files individually took over an
-hour and failed. **Nothing runs until you extract it.**
-
-cPanel → **File Manager** → open the folder you uploaded to (see step 3) →
-
-1. If a **`vendor/`** folder already exists there, **delete it first.** A half-populated
-   vendor tree produces confusing "class not found" errors instead of an obvious
-   "missing dependency" one.
-2. Right-click **`vendor.zip`** → **Extract** → into the **current directory**.
-   The archive contains `vendor/` itself, so extracting in place puts the files exactly
-   where they belong. Do **not** create a subfolder.
-3. Leave `vendor.zip` in place. Deleting it is fine, but leaving it avoids nothing.
-
-## 3. ⚠️ Point the domain at the right folder (3 min) — the main remaining step
-
-Right now `https://attendance.darscoffee.com/` shows **"Index of /"** with an empty list.
-That is not an error — it is an **empty directory**. The domain is serving a folder that the
-deploy does not write to.
-
-cPanel → **Domains** → find `attendance.darscoffee.com` → **Document Root** → set it to:
+cPanel → **Domains** → `attendance.darscoffee.com` → **Document Root** → set it to:
 
 ```
-/home/mwstayco/darscoffee.com/attendance/public
+/home/mwstayco/attendance.darscoffee.com/attendance/public
 ```
 
-Two things to get right:
+It must end in **`/public`**, never the app folder. If the app folder itself is the web root,
+`/.env` — the database password and `APP_KEY` — is downloadable by anyone. `APP_KEY` decrypts
+the employee IC numbers.
 
-- It must end in **`/public`**, not the app folder. If the app folder itself is the web root,
-  `/.env` — which holds your database password and `APP_KEY` — is downloadable by anyone.
-  `APP_KEY` decrypts the employee IC numbers.
-- **Confirm the first part of that path is where the upload actually went.** Open File Manager
-  and check that you can see `artisan`, `app/`, `vendor/` and `vendor.zip` in
-  `/home/mwstayco/darscoffee.com/attendance`. If your FTP account lands somewhere else, use
-  that path followed by `/public`. **This is the one thing I could not verify from here** —
-  I cannot see the server's filesystem.
+Save, wait a minute, then reload the site.
 
-Save, wait a minute, then the site should stop showing "Index of /".
+## 2. ⚠️ Move `.env` into the app root (1 min)
+
+`.env` is currently at `.../attendance.darscoffee.com/.env` — **one level above** where Laravel
+looks. **Laravel reads `.env` from the app root**, the folder containing `artisan`.
+
+cPanel → **File Manager** → **Move** that `.env` to:
+
+```
+/home/mwstayco/attendance.darscoffee.com/attendance/.env
+```
+
+If this is missed, the symptom is a **500 error** saying *"No application encryption key has
+been specified"*, and the database credentials are silently absent too. It looks like a
+broken install rather than a misplaced file.
+
+Keep exactly one `.env`. A stray copy outside the app root is also a secrets file sitting in a
+folder that could later become a document root.
+
+> If `.env` did not survive the move at all, recreate it from the template in
+> `docs/deployment.md` step 3, and make sure `APP_KEY` is present — generating a **new** one on
+a database that already holds data makes stored IC numbers unreadable.
+
+## 3. Unpack `vendor.zip` (2 min)
+
+`vendor/` ships as one archive because uploading ~10,000 files individually took over an hour
+and failed. **Nothing runs until you extract it.**
+
+File Manager → open **`.../attendance.darscoffee.com/attendance`** →
+
+1. If a **`vendor/`** folder already exists there, **delete it first.** A half-populated vendor
+   tree gives confusing "class not found" errors instead of an obvious missing-dependency one.
+2. Right-click **`vendor.zip`** → **Extract** → into the **current directory**. The archive
+   contains `vendor/` itself, so extracting in place lands the files exactly where they belong.
+   Do **not** create a subfolder.
+3. Delete `index.html` from the app's **`public/`** folder if one is there — a placeholder can
+   take precedence over Laravel's `index.php` and make the app look broken.
 
 ## 4. Prove `.env` is not exposed (1 min)
 
@@ -67,14 +94,19 @@ Open: `https://attendance.darscoffee.com/.env`
 
 Also check `https://attendance.darscoffee.com/storage/logs/laravel.log` — 403 or 404.
 
+At this point the site should show a Laravel error (a 500 about the database), **not** "Index
+of /". That is progress: it means the app is finally being served.
+
 ## 5. Install (5 min, one-off)
 
-The database has no tables yet. cPanel → **Cron Jobs** → **Add New Cron Job**, run it **once**
-(minute `*` is fine for a single manual run):
+The database has no tables yet. cPanel → **Cron Jobs** → **Add New Cron Job**, run it **once**:
 
 ```
-/usr/local/bin/php /home/mwstayco/darscoffee.com/attendance/artisan attendance:install --seed
+/usr/local/bin/php /home/mwstayco/attendance.darscoffee.com/attendance/artisan attendance:install --seed
 ```
+
+Use the real PHP path for your host — check cPanel's **Select PHP Version** page, or ask
+support. A wrong path makes cron fail silently; nothing appears in the app's logs.
 
 Wait a minute, then **delete that cron job** — leaving it would re-run the installer.
 
@@ -102,7 +134,7 @@ it can sign in and read every staff member's hours and photographs.
 cPanel → **Cron Jobs**, every minute:
 
 ```
-* * * * * cd /home/mwstayco/darscoffee.com/attendance && /usr/local/bin/php artisan schedule:run >> /dev/null 2>&1
+* * * * * cd /home/mwstayco/attendance.darscoffee.com/attendance && /usr/local/bin/php artisan schedule:run >> /dev/null 2>&1
 ```
 
 **Do not skip this.** Without it:

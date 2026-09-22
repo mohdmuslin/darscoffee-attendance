@@ -37,15 +37,46 @@ them and uploads everything over FTP.
 ## Target
 
 ```
-Domain         attendance.darscoffee.com  (subdomain, NOT the apex domain)
+Domain         attendance.darscoffee.com
 FTP host       ftp.mwstay.com        port 21 (plain FTP — see below)
 FTP user       darscoffeeeftipi@darscoffee.com
-App directory  /home/mwstayco/darscoffee.com/attendance
-Document root  /home/mwstayco/darscoffee.com/attendance/public   ← NOT the app directory
-Database       own MySQL database + user, NOT shared with the ordering system
-Cron           php artisan schedule:run    every minute
-Timezone       store UTC, display Asia/Kuala_Lumpur
+FTP lands at   /home/mwstayco/attendance.darscoffee.com/attendance
+Access         NO SSH, NO cPanel Terminal — cron + File Manager + FTP only
 ```
+
+**The layout on the server:**
+
+```
+/home/mwstayco/attendance.darscoffee.com/
+  public/            <- leftover empty folder, NOT the docroot
+  attendance/        <- the Laravel application root
+    artisan          app/   bootstrap/   config/   storage/
+    vendor/ (from vendor.zip)          .env
+    public/          <- DOCROOT: index.php + build/
+```
+
+| What | Path |
+|---|---|
+| App root | `/home/mwstayco/attendance.darscoffee.com/attendance` |
+| **Document root** | `/home/mwstayco/attendance.darscoffee.com/attendance/public` |
+| `.env` | `/home/mwstayco/attendance.darscoffee.com/attendance/.env` |
+| Database | own MySQL database + user, NOT shared with the ordering system |
+| Cron | `php artisan schedule:run` every minute |
+| Timezone | store UTC, display Asia/Kuala_Lumpur |
+
+> ⚠️ **cPanel will not let the document root escape `/home/mwstayco/attendance.darscoffee.com/`.**
+> A Laravel app therefore has to live *inside* that folder, which is the layout above. This is
+> why the app was moved out of `darscoffee.com/attendance` — that location can never be served,
+> no matter how the domain is configured.
+>
+> ⚠️ **`.env` must be in the APP ROOT**, i.e. `.../attendance.darscoffee.com/attendance/.env`.
+> Laravel reads it from the app root — the folder containing `artisan`. A copy one level up is
+> never read, and the app then dies with "No application encryption key has been specified"
+> and no database credentials. Keep exactly one, in the app root.
+>
+> ⚠️ **Delete `public/index.html` if the host created one.** A placeholder `index.html` can
+> take precedence over Laravel's `index.php` depending on `DirectoryIndex` order, which looks
+> like a broken app while every path and permission is correct.
 
 > **The transport is plain, unencrypted FTP, and the host is why.** It offers FTPS, and the
 > TLS *control* connection works — but every TLS **data** connection fails with
@@ -286,7 +317,7 @@ The database has no tables yet. cPanel → **Cron Jobs** → add a job, running 
 (`* * * * *` is fine for a single manual run):
 
 ```
-/usr/local/bin/php /home/mwstayco/darscoffee.com/attendance/artisan attendance:install --seed
+/usr/local/bin/php /home/mwstayco/attendance.darscoffee.com/attendance/artisan attendance:install --seed
 ```
 
 Use the real PHP path for your host — check cPanel's **Select PHP Version** page, or ask
@@ -316,7 +347,7 @@ Two jobs run on a schedule, and both fail silently without cron. cPanel → **Cr
 every minute:
 
 ```
-* * * * * cd /home/mwstayco/darscoffee.com/attendance && /usr/local/bin/php artisan schedule:run >> /dev/null 2>&1
+* * * * * cd /home/mwstayco/attendance.darscoffee.com/attendance && /usr/local/bin/php artisan schedule:run >> /dev/null 2>&1
 ```
 
 | Job | Frequency | What breaks without it |
@@ -345,7 +376,7 @@ release included a migration** — apply it.
 **Option A — one-off cron job.** The simplest, and fine if releases are occasional:
 
 ```
-/usr/local/bin/php /home/mwstayco/darscoffee.com/attendance/artisan attendance:deploy
+/usr/local/bin/php /home/mwstayco/attendance.darscoffee.com/attendance/artisan attendance:deploy
 ```
 
 Wait a minute, then delete the job.
@@ -354,7 +385,7 @@ Wait a minute, then delete the job.
 permanent entry that does nothing until a flag appears:
 
 ```
-* * * * * cd /home/mwstayco/darscoffee.com/attendance && /usr/local/bin/php artisan attendance:deploy --if-flagged >> /dev/null 2>&1
+* * * * * cd /home/mwstayco/attendance.darscoffee.com/attendance && /usr/local/bin/php artisan attendance:deploy --if-flagged >> /dev/null 2>&1
 ```
 
 Then a release is:
@@ -385,15 +416,15 @@ Some shared hosts only serve from `public_html`. Put the app outside the web roo
 forward only its `public` folder:
 
 ```
-/home/mwstayco/darscoffee.com/attendance/          ← the app, NOT web-accessible
-/home/mwstayco/public_html/                       ← document root
+/home/mwstayco/attendance.darscoffee.com/attendance/          ← the app, NOT web-accessible
+/home/mwstayco/public_html/                                  ← document root
 ```
 
 Copy `attendance/public/*` into `public_html/`, then edit `public_html/index.php`:
 
 ```php
-require __DIR__.'/../darscoffee.com/attendance/vendor/autoload.php';
-$app = require_once __DIR__.'/../darscoffee.com/attendance/bootstrap/app.php';
+require __DIR__.'/../attendance.darscoffee.com/attendance/vendor/autoload.php';
+$app = require_once __DIR__.'/../attendance.darscoffee.com/attendance/bootstrap/app.php';
 ```
 
 Adjust the paths to your layout. **Then re-run the step 1 test** — browse to `/.env` and
