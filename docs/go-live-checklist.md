@@ -21,14 +21,42 @@ future release until it is fixed.
 
 ## 1. ⚠️ Change the two published passwords — do this now (5 min)
 
-Sign in at `https://attendance.darscoffee.com/console` and change **both**:
+**There is no change-password screen in the console.** `AccountsView.vue` can only *set* a
+password when creating an account, and the API's owner-only `PATCH /admin/users/{id}` supports
+it but has no UI in front of it. So the two seeded accounts keep the password `password`, which
+is **published in the public repository** — anyone who has seen it can sign in as owner and read
+every staff member's hours and photographs.
 
-- `owner@darscoffee.com`
-- `fatimahbokhare@gmail.com`
+Adding the missing screen is the real fix, but **the FTP deploy is broken (`530`)**, so no new
+code can reach the server yet. Use the script instead — it needs only File Manager and the cron
+job you already have working.
 
-Both are currently `password`, and that is **published in the public repository**. Anyone who
-has seen it can sign in and read every staff member's hours and photographs. This is the only
-item here that is a live security exposure.
+**1. Upload** `scripts/set-console-password.php` to the **application root** (the folder
+containing `artisan`) — via File Manager → Upload.
+It must go in the app root, not `public/`, because its paths are relative to its own location.
+
+**2. Add a one-off cron job** — cPanel → Cron Jobs (`*` in the minute field is fine):
+
+```
+/usr/local/bin/php /home/mwstayco/attendance.darscoffee.com/attendance/set-console-password.php >> /home/mwstayco/password-change.log 2>&1
+```
+
+**3. Wait a minute**, then open `/home/mwstayco/password-change.log` in File Manager and
+**copy the two generated passwords.** They are printed once and cannot be recovered.
+
+**4. Delete** the cron job, the log file, and the script.
+
+> The script **deletes itself**, so a forgotten copy cannot be re-run later to reset the
+> passwords again. It prints whether that worked — if it says it could not, delete the file by
+> hand. Deleting a file in the app root is not possible over HTTP, so it is not web-reachable,
+> but remove it anyway.
+
+Then sign in at `https://attendance.darscoffee.com/console` to confirm the new password works.
+
+> **Worth fixing properly:** once the FTP deploy is repaired, add a change-password screen.
+> Until then, changing a password means repeating this. Note that both accounts are now random
+> 24-character strings, so they need to be stored somewhere a manager can reach — hand them over
+> in person or by whatever channel you use for credentials, not in a shared document.
 
 ## 2. ✅ Permanent cron — done and verified
 
