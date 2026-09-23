@@ -586,3 +586,36 @@ The guard is the second line of defence.
 | Database connection refused | Wrong name, user, or password in `.env`; or the user was not added to the database. |
 | Cron does nothing | Wrong PHP path. Check cPanel → Select PHP Version, or ask support. |
 | 500 on every page | Read `storage/logs/laravel.log` — the real error is there, not on screen (debug is off, correctly). |
+
+### ⚠️ A 500 with an EMPTY log — suspect the `storage/` tree
+
+This one deserves its own entry, because the usual advice ("read the log") leads nowhere.
+
+The deploy **excludes everything under `storage/` on purpose** — that is what protects the
+photographs, the sessions and the cache from being deleted by the reconciliation. The
+consequence is that a fresh server has **no** `storage/framework/views`, no
+`storage/framework/cache`, and no `storage/logs`.
+
+- Missing `storage/framework/views` → the application dies with *"View path not found"*.
+- Missing `storage/logs` → **the error cannot be written anywhere.** `laravel.log` is absent or
+  empty, so "there is nothing in the log" is not evidence that nothing is wrong. It can mean
+  logging itself has nowhere to go.
+
+Two response shapes point at this, and they mean different things:
+
+| What you get | What it means |
+|---|---|
+| 500, **zero-length** body | PHP died on a fatal error **before** Laravel started — usually `vendor/autoload.php` absent, i.e. `vendor.zip` not extracted |
+| 500 with a **small generic error page** (`~1 KB`, `Cache-Control: no-cache, private`) | Laravel **booted** and threw — `vendor/` is fine, so look at the storage tree or the database |
+
+**The fix is to run the installer**, which is why it exists: `attendance:install` calls
+`ensureStorageTree()` as its very first action, before generating the key or migrating. Run it
+once as a one-off cron job (step 5). For routine releases, `attendance:deploy` recreates the
+tree too.
+
+**How to tell a fresh server from a working one without any tooling:** request a known static
+asset — `/robots.txt` or `/build/manifest.json`. If those return **200** while `/` returns 500,
+the document root is correct and the problem is inside the application, not in the hosting
+setup. If they 404 as well, the document root is wrong and nothing else is worth investigating
+until it is fixed.
+
