@@ -116,12 +116,24 @@ Also check `https://attendance.darscoffee.com/storage/logs/laravel.log`. Same ex
 
 cPanel → **MySQL® Databases**:
 
-1. Create a database. cPanel prefixes it with your account name, e.g. `mwstayco_attendance`.
+1. Create a database. cPanel prefixes it with your account name.
 2. Create a user.
 3. **Add the user to the database** with ALL PRIVILEGES.
 
 Write down the full database name, the full username, and the password. The names are
 prefixed — `.env` needs the complete values, not what you typed in the box.
+
+> ⚠️ **The username is NOT the database name.** cPanel generates them independently, so the
+> database might be `mwstayco_attendance` while the user is `mwstayco_attadm`. Copy both from
+> the cPanel list rather than assuming one mirrors the other. Using `mwstayco_attendance` as
+> the username gives `Access denied for user` — which reads like a server or password fault
+> and sends you looking in the wrong place.
+>
+> **This deployment's actual values:**
+> ```ini
+> DB_DATABASE=mwstayco_attendance
+> DB_USERNAME=mwstayco_attadm
+> ```
 
 ---
 
@@ -131,7 +143,21 @@ prefixed — `.env` needs the complete values, not what you typed in the box.
 never touched by deploys — the deploy config explicitly excludes it, or it would be deleted
 on the first run.
 
-Create `.env` **in the app directory** via cPanel → **File Manager** → New File, then edit it:
+Create `.env` **in the APP ROOT** — the folder containing `artisan` — via cPanel →
+**File Manager** → New File, then edit it:
+
+```
+/home/mwstayco/attendance.darscoffee.com/attendance/.env
+                                            ^^^^^^^^^^
+                                            Laravel reads .env from
+                                            the folder holding artisan
+```
+
+> ⚠️ **A `.env` one level too high is never read.** The symptom is a **500** saying
+> *"No application encryption key has been specified"*, with the database credentials just as
+> silently absent. It looks like a broken install rather than a misplaced file. Keep exactly
+> one `.env`, in the app root — a stray copy elsewhere is also a secrets file sitting in a
+> folder that could later become a document root.
 
 ```ini
 APP_NAME="Dars Attendance"
@@ -144,7 +170,7 @@ DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_DATABASE=mwstayco_attendance
-DB_USERNAME=mwstayco_attendance
+DB_USERNAME=mwstayco_attadm
 DB_PASSWORD=...
 
 SESSION_DRIVER=database
@@ -205,6 +231,32 @@ GitHub → **Settings → Secrets and variables → Actions** → add three repo
 Then trigger the workflow: **Actions → Deploy to cPanel → Run workflow**. Or push any
 commit to `main`.
 
+> ⚠️ **Editing the FTP account in cPanel can invalidate its stored password.** Setting the
+> account's **Directory** is enough to do it. The deploy then fails with:
+>
+> ```
+> FTPError: 530 Login authentication failed
+> ```
+>
+> This has happened once already, and it is worth knowing why it is confusing: the workflow's
+> earlier steps all pass, the build is fine, and the failure reads as a bad password — but the
+> password was correct before the account was edited. If the directory was just changed,
+> re-enter the password and update the `FTP_PASSWORD` secret.
+>
+> **`scripts/ftp-login-check.ps1` separates the two possible causes.** It asks for the
+> password at runtime (hidden — it is never printed or written to disk, so it is safe to keep
+> in the repository), attempts a plain FTP login, and lists the landing directory:
+>
+> - **LOGIN FAILED** → the cPanel account or password is wrong; the GitHub secret is a red
+>   herring.
+> - **LOGIN OK** → the server is fine, so the `FTP_PASSWORD` **secret** is stale. Delete the
+>   secret and re-add it by pasting; a trailing newline pasted in with the password produces
+>   exactly this 530.
+>
+> The listing also reveals where FTP actually lands, which is worth confirming against the
+> **Target** paths near the top of this document — a mismatch there means every deploy writes
+> to the wrong place.
+
 It will:
 
 1. **Wait for the CI tests to pass on that commit** — a broken commit must not reach staff,
@@ -238,6 +290,20 @@ what it would do without changing anything.
 artifact** — Composer generates it from `composer.lock` — so the workflow packages it into a
 single `vendor.zip` and you unpack it on the server. That turns ~10,000 transfers into about
 250.
+
+> ⚠️ **The deploy uploads `vendor.zip` and NEVER extracts it.** There is no shell on this host
+> to run `unzip`, so extraction is a manual step that has to be repeated after any release that
+> changes dependencies. Skipping it does not produce a clear error: `public/index.php` is
+> present and PHP runs, so the site returns a **500 with an empty body** (because
+> `APP_DEBUG=false`), which looks like a broken application rather than a missing folder.
+>
+> **Symptom to recognise:** 500 on every route, zero-length response body, while static files
+> like `/robots.txt` and `/build/manifest.json` still return 200. That combination means the
+> document root is right and dependencies are missing.
+>
+> Check for `vendor/autoload.php` in the app root. If it is absent, extract `vendor.zip`
+> **in the app root** — the archive contains `vendor/` itself, so extracting in place puts the
+> files where they belong. Do not create a subfolder.
 
 > **Correction, because the first explanation here was wrong.** The original upload moved
 > 8,599 individual files over **62 minutes** and failed with a TLS error, and this document

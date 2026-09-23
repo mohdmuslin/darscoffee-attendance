@@ -1,17 +1,23 @@
-# Morning checklist — Dars Attendance go-live
+# Go-live checklist — Dars Attendance
 
-**Where things stand (22 Sept, morning):**
+**Where things stand (24 Sept):**
 
 | | Status |
 |---|---|
-| The deploy pipeline | ✅ **Working** — three consecutive successful uploads |
-| The app files on the server | ✅ Moved to the subdomain folder |
-| Document root | ❌ Still serving an empty folder → "Index of /" |
-| `vendor.zip` | ❌ Not yet extracted |
+| App files on the server | ✅ In the right folder |
+| **Document root** | ✅ **Correct** — Laravel's own files are served |
+| Front controller (`public/index.php`) | ✅ Present, and **PHP executes** |
+| `vendor/` | ❌ **Missing — this is the current 500** |
+| Deploy pipeline | ❌ Broken: `FTPError: 530 Login authentication failed` |
 | Install / cron / passwords | ❌ Not yet done |
 
-The list below is about 30 minutes. **Steps 1–3 are the ones that matter** — until they are
-done, nothing else can work.
+**The current symptom is a 500 with an empty body on every route.**
+
+That is not a general "the app is broken" — it is precisely what you get when the document
+root is correct, PHP runs, and `vendor/autoload.php` is absent. The static files prove the
+diagnosis: `/robots.txt` and `/build/manifest.json` both return **200**.
+
+**Start at step 1** — it unblocks the site without needing FTP at all.
 
 ### The layout that matters
 
@@ -21,7 +27,8 @@ done, nothing else can work.
   attendance/        <- the Laravel application root
     artisan   app/   bootstrap/   config/   storage/
     .env             <- MUST live here (one only)
-    vendor.zip       <- extract into this folder
+    vendor.zip       <- extract INTO this folder
+    vendor/          <- must exist, containing autoload.php
     public/          <- DOCROOT: index.php + build/
 ```
 
@@ -29,73 +36,111 @@ App root: `/home/mwstayco/attendance.darscoffee.com/attendance`
 
 ---
 
-## 1. ⚠️ Set the document root (3 min) — the main remaining step
+## 1. ⚠️ Extract `vendor.zip` (2 min) — start here
 
-`https://attendance.darscoffee.com/` shows **"Index of /"** with an empty list. That is not an
-error: the domain is serving an **empty folder** (`.../attendance.darscoffee.com/public`), which
-is not where the app is.
-
-cPanel → **Domains** → `attendance.darscoffee.com` → **Document Root** → set it to:
-
-```
-/home/mwstayco/attendance.darscoffee.com/attendance/public
-```
-
-It must end in **`/public`**, never the app folder. If the app folder itself is the web root,
-`/.env` — the database password and `APP_KEY` — is downloadable by anyone. `APP_KEY` decrypts
-the employee IC numbers.
-
-Save, wait a minute, then reload the site.
-
-## 2. ⚠️ Move `.env` into the app root (1 min)
-
-`.env` is currently at `.../attendance.darscoffee.com/.env` — **one level above** where Laravel
-looks. **Laravel reads `.env` from the app root**, the folder containing `artisan`.
-
-cPanel → **File Manager** → **Move** that `.env` to:
-
-```
-/home/mwstayco/attendance.darscoffee.com/attendance/.env
-```
-
-If this is missed, the symptom is a **500 error** saying *"No application encryption key has
-been specified"*, and the database credentials are silently absent too. It looks like a
-broken install rather than a misplaced file.
-
-Keep exactly one `.env`. A stray copy outside the app root is also a secrets file sitting in a
-folder that could later become a document root.
-
-> If `.env` did not survive the move at all, recreate it from the template in
-> `docs/deployment.md` step 3, and make sure `APP_KEY` is present — generating a **new** one on
-a database that already holds data makes stored IC numbers unreadable.
-
-## 3. Unpack `vendor.zip` (2 min)
-
-`vendor/` ships as one archive because uploading ~10,000 files individually took over an hour
-and failed. **Nothing runs until you extract it.**
+The deploy uploads `vendor.zip` but **never extracts it** — there is no shell on this host to
+run `unzip`, so this is a permanent manual step. Until it is done, the site cannot run.
 
 File Manager → open **`.../attendance.darscoffee.com/attendance`** →
 
-1. If a **`vendor/`** folder already exists there, **delete it first.** A half-populated vendor
-   tree gives confusing "class not found" errors instead of an obvious missing-dependency one.
+1. If a **`vendor/`** folder already exists, **delete it first.** A half-populated vendor tree
+   produces confusing "class not found" errors instead of an obvious missing-dependency one.
 2. Right-click **`vendor.zip`** → **Extract** → into the **current directory**. The archive
-   contains `vendor/` itself, so extracting in place lands the files exactly where they belong.
-   Do **not** create a subfolder.
-3. Delete `index.html` from the app's **`public/`** folder if one is there — a placeholder can
-   take precedence over Laravel's `index.php` and make the app look broken.
+   contains `vendor/` itself, so extracting in place lands the files correctly. Do **not**
+   create a subfolder.
+3. **Confirm `vendor/autoload.php` now exists.** That one file is what `public/index.php`
+   requires; without it nothing else matters.
+4. Delete **`index.html`** from the app's `public/` folder if present — a placeholder beats
+   `index.php` in the directory-index order and makes the site look empty or broken.
+
+Reload the site. **The 500 should turn into something else** — a Laravel error page, a
+redirect to `/console`, or a login screen. Any of those means the app is finally running.
+
+> **Repeat this after any release that changes dependencies.** Each deploy replaces
+> `vendor.zip`, but the app keeps using the `vendor/` extracted from the old one — so a new
+> package appears installed when it is not. That failure looks like a code bug.
+
+## 2. ⚠️ Fix the FTP deploy (5 min)
+
+Every deploy since the FTP account's Directory was changed fails with:
+
+```
+FTPError: 530 Login authentication failed
+```
+
+The password worked before that edit — **editing an FTP account in cPanel can invalidate its
+stored password.** Run this to find out which half is broken:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\ftp-login-check.ps1
+```
+
+It asks for the password at runtime (hidden — never printed, never written to disk) and lists
+the directory FTP lands in.
+
+| Result | Meaning | Fix |
+|---|---|---|
+| **LOGIN FAILED** | the cPanel account/password is wrong | cPanel → FTP Accounts → change the password, then update the GitHub secret |
+| **LOGIN OK** | the server is fine; the secret is stale | delete the `FTP_PASSWORD` secret and re-add it by **pasting** |
+
+A trailing newline pasted into a secret produces exactly this 530. That is why the check
+exists rather than another guess.
+
+While there, confirm the account's **Directory** is
+`/home/mwstayco/attendance.darscoffee.com/attendance`. Then say so and I will re-run the
+deploy, so anything else missing uploads automatically.
+
+> Until this is fixed, **releases cannot be delivered** — but steps 1 and 3 onward do not need
+> it.
+
+## 3. Confirm `.env` is in the app root and correct (2 min)
+
+`.env` must be at `/home/mwstayco/attendance.darscoffee.com/attendance/.env` — the folder
+containing `artisan`. **Laravel reads it from there and nowhere else.** A copy one level up is
+never read, and the symptom is a **500** saying *"No application encryption key has been
+specified"* with the database credentials just as silently missing.
+
+If it is missing or in the wrong place, move it (or recreate it from the template in
+`docs/deployment.md` step 3). Required values:
+
+```ini
+APP_NAME="Dars Attendance"
+APP_ENV=production
+APP_DEBUG=false
+APP_KEY=                      # attendance:install fills this in
+APP_URL=https://attendance.darscoffee.com
+
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=mwstayco_attendance
+DB_USERNAME=mwstayco_attadm   # attadm, NOT attendance
+DB_PASSWORD=...
+
+SESSION_DRIVER=database
+CACHE_STORE=database
+QUEUE_CONNECTION=sync
+FILESYSTEM_DISK=local
+
+ATTENDANCE_TIMEZONE=Asia/Kuala_Lumpur
+
+# Add ONLY if a proxy/CDN fronts this domain — see step 8.
+# TRUSTED_PROXIES=*
+```
+
+> Do **not** invent an `APP_KEY`. Generating a new one over a database that already holds data
+> makes every stored IC number permanently unreadable, silently. If the database really is
+> empty, `attendance:install` generates one for you.
 
 ## 4. Prove `.env` is not exposed (1 min)
 
 Open: `https://attendance.darscoffee.com/.env`
 
 - **403 or 404** → correct. Carry on.
-- **You can read it** → **stop and fix the document root first.** Then change the database
+- **You can read it** → **stop.** Fix the document root first, then change the database
   password **and** generate a new `APP_KEY`, because both were exposed.
 
 Also check `https://attendance.darscoffee.com/storage/logs/laravel.log` — 403 or 404.
-
-At this point the site should show a Laravel error (a 500 about the database), **not** "Index
-of /". That is progress: it means the app is finally being served.
 
 ## 5. Install (5 min, one-off)
 
@@ -116,8 +161,15 @@ Check the result: `https://attendance.darscoffee.com/storage/logs/laravel.log`
 Siti Fatimah as manager for all three outlets.
 
 > If the log shows a database error, the cause is almost always a **database name or user that
-> is missing its cPanel account prefix** — `mwstayco_` — in `.env`. `.env` needs the full
-> name, not what you typed into the box.
+> is missing its cPanel account prefix** — `mwstayco_` — in `.env`.
+>
+> ⚠️ **The username is not the database name.** cPanel generates them separately:
+> ```ini
+> DB_DATABASE=mwstayco_attendance
+> DB_USERNAME=mwstayco_attadm      <- attadm, NOT attendance
+> ```
+> Using the database name as the username gives `Access denied for user`, which reads like a
+> wrong password rather than a wrong name.
 
 ## 6. ⚠️ Change the two published passwords (2 min)
 
@@ -166,24 +218,35 @@ scanning a printed QR, a clock in/out, and an offline punch that syncs.
 
 ---
 
-## What changed overnight, in one paragraph
+## Background: how we got here, and the two wrong turns
 
-Every deploy had been failing, and my first explanation was wrong. I said the upload was too
-**slow** — 8,599 files in 62 minutes against a host that drops idle connections — and fixed it
-by shipping `vendor/` as a single zip. The next run proved that wrong: with the zip in place,
-~250 files transferred and it **still failed, in 4 minutes**, with the same error. The real
-fault was **FTPS itself**: every TLS *data* connection failed
-(`SSL alert number 50 (data socket)`) because the action bundles a `basic-ftp` version that
-Node 24 broke, and no setting or upgrade fixes it. So the transport is now **plain FTP**,
-which I verified the host permits before switching. The trade: the FTP password and the
-transferred bytes are unencrypted. That is a real loss, accepted because `.env`, the app key
-and the staff photographs are **excluded** from the upload — only source code and build
-artifacts travel. The zip stayed, because it is much faster, it just was not the fix.
+Worth reading once, so the same ground is not re-covered.
 
-> **Every future push to `main` deploys automatically** once the repository variable
-> `FTP_DEPLOY_ENABLED` is `true` — check under **Settings → Secrets and variables → Actions →
-> Variables** if you are unsure whether it is still set. Until it is `true`, runs are
-> rehearsals that report without transferring.
+**Wrong turn 1 — "the upload is too slow."** The first real upload moved 8,599 files over 62
+minutes and failed with a TLS error. That was read as a duration problem, and the fix was to
+ship `vendor/` as a single `vendor.zip`. The next run disproved it: ~250 files transferred and
+it **still failed, in 4 minutes**, with the same error. Duration was never the cause.
+
+**Wrong turn 2 — "the payload is the problem."** The real fault was **FTPS itself**: every TLS
+*data* connection failed with `SSL alert number 50 (data socket)`, because the action bundles
+a `basic-ftp` version that Node 24 broke, and no setting or upgrade fixes it. The transport is
+now **plain FTP**, which was verified to be permitted before switching. The trade is real: the
+FTP password and the transferred bytes are unencrypted. It is accepted because `.env`, the app
+key and the staff photographs are **excluded** from the upload — only source code and build
+artifacts travel.
+
+The zip stayed. It is much faster, it just was not the fix it was described as. That
+correction is written into the workflow and this document in place of the original claim,
+because the wrong explanation is the one that would have led the next person to keep tuning
+timeouts.
+
+**And the deployment is not finished until `vendor.zip` is extracted by hand.** There is no
+shell on this host, so nothing can unzip it automatically. That step is manual forever, and it
+is the single most likely reason a working deploy produces a 500.
+
+> **Every push to `main` deploys automatically** once the repository variable
+> `FTP_DEPLOY_ENABLED` is `true` (Settings → Secrets and variables → Actions → Variables).
+> Until it is `true`, runs are rehearsals that report without transferring.
 >
-> If a release includes a migration, the deploy has **not** applied it — see
-> `docs/deployment.md` step 7 for the cron method that does.
+> A deploy does **not** apply migrations — see `docs/deployment.md` step 7 for the cron method
+> that does.
