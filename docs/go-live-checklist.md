@@ -9,13 +9,13 @@
 | **Application running** | ✅ **`/punch` and `/console` both load** |
 | `/.env` protected | ✅ 403 |
 | Install (`APP_KEY`, schema, seed) | ✅ Done |
+| **Permanent cron** | ✅ Added and **verified firing** |
 | **Seeded passwords** | ⚠️ **Still `password` — change today** |
-| Permanent cron | ❌ Not added |
 | FTP deploy | ❌ Broken (`530`) — blocks future releases |
 
-**The site works.** What remains is safety and maintainability, not getting it up: two
-passwords that are published in a public repository, and the scheduled jobs that stop a
-forgotten clock-out from locking an employee out.
+**The site works and the scheduled jobs run.** What remains is safety and maintainability: two
+passwords that are published in a public repository, and an FTP deploy that cannot ship a
+future release until it is fixed.
 
 ---
 
@@ -30,23 +30,44 @@ Both are currently `password`, and that is **published in the public repository*
 has seen it can sign in and read every staff member's hours and photographs. This is the only
 item here that is a live security exposure.
 
-## 2. Add the permanent cron (2 min)
+## 2. ✅ Permanent cron — done and verified
 
-The application is up, but its scheduled jobs are not running. cPanel → **Cron Jobs**, every
-minute:
+cPanel → **Cron Jobs**, every minute:
 
 ```
 * * * * * cd /home/mwstayco/attendance.darscoffee.com/attendance && /usr/local/bin/php artisan schedule:run >> /dev/null 2>&1
 ```
 
-**Do not skip this.** Without it:
+**This was verified, not assumed.** That matters here because cron redirects its output to
+`/dev/null`, so a wrong PHP path or a wrong directory fails **completely silently** — no error,
+no log, and the only symptom appears days later as "the app stopped working".
+
+To re-verify at any time, temporarily log instead of discarding:
+
+```
+* * * * * cd /home/mwstayco/attendance.darscoffee.com/attendance && /usr/local/bin/php artisan schedule:run >> /home/mwstayco/schedule.log 2>&1
+```
+
+Any readable output — even just `No scheduled commands are ready to run.` — proves cron fired,
+the PHP path is right, and the directory is right. Then switch back to `>> /dev/null 2>&1`.
+
+**What is scheduled** (confirmed locally with `php artisan schedule:list`):
+
+```
+0 19 * * *  attendance:purge-photos        -> 03:00 Kuala Lumpur
+0  * * * *  attendance:flag-open-segments   -> hourly
+```
+
+The `0 19` is deliberately **not** `0 3`. The application runs in UTC and the business does
+not, so 03:00 local is 19:00 UTC. A naive `dailyAt('03:00')` would fire at 11am in Kuala
+Lumpur — deleting photographs while the console is in use.
+
+**Why each job matters:**
 
 - A forgotten clock-out is never flagged — and **that employee then cannot clock in at all**.
   They scan, enter their PIN, press the button, and **nothing happens**, with no error on
   screen. Nobody at the counter can work out why.
 - Photographs are kept past the retention window, which is a PDPA gap nobody notices.
-
-Check the PHP path is right (cPanel → **Select PHP Version**). A wrong path fails silently.
 
 ## 3. Fix the FTP deploy (5 min)
 
