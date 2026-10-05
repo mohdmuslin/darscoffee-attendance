@@ -39,7 +39,10 @@ them and uploads everything over FTP.
 ```
 Domain         attendance.darscoffee.com
 FTP host       ftp.mwstay.com        port 21 (plain FTP — see below)
-FTP user       darscoffeeeftipi@darscoffee.com
+FTP user       darscoffeeeftipi@attendance.darscoffee.com
+               ^ the domain part is the ACCOUNT's own domain (attendance.darscoffee.com),
+                 not the site being served. A wrong name here answers `530`, which looks
+                 exactly like a wrong password.
 FTP lands at   /home/mwstayco/attendance.darscoffee.com/attendance
 Access         NO SSH, NO cPanel Terminal — cron + File Manager + FTP only
 ```
@@ -225,7 +228,7 @@ GitHub → **Settings → Secrets and variables → Actions** → add three repo
 | Name | Value |
 |---|---|
 | `FTP_SERVER` | `ftp.mwstay.com` |
-| `FTP_USERNAME` | `darscoffeeeftipi@darscoffee.com` |
+| `FTP_USERNAME` | `darscoffeeeftipi@attendance.darscoffee.com` |
 | `FTP_PASSWORD` | *(your FTP password)* |
 
 Then trigger the workflow: **Actions → Deploy to cPanel → Run workflow**. Or push any

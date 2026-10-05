@@ -9,7 +9,15 @@
 # Run:  powershell -NoProfile -ExecutionPolicy Bypass -File ftp-login-check.ps1
 
 $server = 'ftp.mwstay.com'
-$username = 'darscoffeeeftipi@darscoffee.com'
+
+#
+# The domain part is the account's OWN domain, not the site being served. cPanel names FTP
+# accounts `<user>@<domain>`, and when this account was recreated after the app moved, it was
+# named against `attendance.darscoffee.com`. The older `@darscoffee.com` name no longer
+# exists, and a missing account answers `530 Login authentication failed` — identical to a
+# wrong password. That is what blocked every deploy from 22 September to 6 October.
+#
+$username = 'darscoffeeeftipi@attendance.darscoffee.com'
 
 Write-Host ''
 Write-Host "Server   : $server" -ForegroundColor Cyan
