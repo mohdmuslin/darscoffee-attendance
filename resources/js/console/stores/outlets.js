@@ -45,6 +45,21 @@ export const useOutletStore = defineStore('outlets', {
         },
 
         /**
+         * Edit an outlet's settings.
+         *
+         * Needed because outlets could previously only be CREATED — so a code lifetime,
+         * a photo requirement or a mistake in the name was permanent. Reloads afterwards
+         * since the payload returns fields the list displays.
+         */
+        async update(id, payload) {
+            const outlet = await outletApi.update(id, payload);
+
+            await this.load();
+
+            return outlet;
+        },
+
+        /**
          * Issue a replacement code, revoking the previous one.
          *
          * This is the reprint action. Reprinting is the ONLY way to revoke a printed

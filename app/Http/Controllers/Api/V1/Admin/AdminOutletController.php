@@ -53,7 +53,7 @@ class AdminOutletController extends Controller
             'address' => ['nullable', 'string', 'max:255'],
             'timezone' => ['sometimes', 'string', 'max:64'],
             'token_mode' => ['sometimes', new Enum(OutletTokenMode::class)],
-            'qr_ttl_seconds' => ['sometimes', 'integer', 'min:30', 'max:600'],
+            'qr_ttl_seconds' => ['sometimes', 'integer', 'min:30', 'max:86400'],
             'requires_photo' => ['sometimes', 'boolean'],
             'is_active' => ['sometimes', 'boolean'],
         ]);
@@ -82,7 +82,7 @@ class AdminOutletController extends Controller
              * them without anyone realising until someone could not clock in.
              */
             'token_mode' => ['sometimes', new Enum(OutletTokenMode::class)],
-            'qr_ttl_seconds' => ['sometimes', 'integer', 'min:30', 'max:600'],
+            'qr_ttl_seconds' => ['sometimes', 'integer', 'min:30', 'max:86400'],
             'requires_photo' => ['sometimes', 'boolean'],
             'is_active' => ['sometimes', 'boolean'],
         ]);

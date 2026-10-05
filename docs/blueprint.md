@@ -78,7 +78,7 @@ The owner can add outlets later — nothing is hard-coded to three.
 
 | Mode | How the code is delivered | Lifetime |
 |---|---|---|
-| **Rotating** | A device at the outlet displays it | 90 seconds |
+| **Rotating** | A device at the outlet displays it | Per outlet, 30s–24h (default 90s) |
 | **Printed** | Owner or manager prints a sheet | Until revoked or replaced |
 
 Both are revocable, and **generating a new code revokes the previous one for that
@@ -88,9 +88,15 @@ The mode is set per outlet, because the trade-off differs per site:
 
 | | Rotating | Printed |
 |---|---|---|
-| Photographed code reusable | No (~90s) | Yes, until revoked |
+| Photographed code reusable | No, within the window | Yes, until revoked |
 | Needs a powered device | Yes | No |
 | Coverage for flaky internet | Fail-closed unless offline queue is on | Robust — paper needs nothing |
+
+> **A long rotating window is a weaker rotating code.** The lifetime is configurable because
+> some outlets legitimately need more than 90 seconds, but setting it to hours means a
+> photographed code stays usable for hours — which is what `Printed` already describes
+> honestly. The console says so when a long window is chosen, rather than letting the setting
+> imply a protection it no longer provides.
 
 ### 5.2 The punch flow
 

@@ -114,12 +114,25 @@ const canSubmit = computed(() => Boolean(captured.value)
                 {{ captured ? 'Check your photo' : `Photo for: ${label}` }}
             </p>
 
-            <div class="mt-4 flex-1 overflow-hidden rounded-2xl bg-black">
+            <!--
+                Sized by ASPECT RATIO, never `flex-1`.
+
+                A full-height box is TALLER than it is wide on a phone, so the camera's
+                landscape frame was stretched to fill it — the same long distorted preview
+                staff reported on the scanner. `aspect-[4/3]` matches what the camera
+                actually delivers, so the preview is the right shape on any screen.
+
+                `object-cover` is used here rather than `object-contain` because a
+                letterboxed preview with black bars at the top and bottom makes people
+                hold the phone further away, and this is a selfie. The capture itself is
+                never cropped — see capture() below, which scales the full frame.
+            -->
+            <div class="mt-4 aspect-[4/3] w-full overflow-hidden rounded-2xl bg-black">
                 <img
                     v-if="captured"
                     :src="captured"
                     alt="Your punch photo"
-                    class="h-full w-full object-contain"
+                    class="h-full w-full object-cover"
                 />
                 <video
                     v-else

@@ -561,6 +561,43 @@ because the down-migrations drop tables.
 
 `APP_KEY` is not in git and is never touched by a deploy, so it survives a rollback.
 
+### The tagged known-good release
+
+```
+last-known-good-deploy
+```
+
+A git tag, pushed to the remote, pointing at the last commit verified to **deploy successfully
+and serve the live site**. It exists so a rollback does not depend on remembering a hash.
+
+Roll back to it:
+
+```powershell
+cd "c:\Users\User\CustomerDatabase\Dars Attendance"
+& 'C:\laragon\bin\git\bin\git.exe' fetch --tags
+& 'C:\laragon\bin\git\bin\git.exe' checkout -B rollback last-known-good-deploy
+& 'C:\laragon\bin\git\bin\git.exe' push origin rollback:main --force-with-lease
+```
+
+> `--force-with-lease` rather than `--force`: it refuses if someone else has pushed since you
+> fetched, so this cannot silently discard work. Prefer `git revert` when only one commit is at
+> fault — a revert keeps the history and is reviewable, whereas forcing the branch backwards
+> makes the bad commit disappear and hides what happened.
+
+**Move the tag forward only after a release has been confirmed working on the live site**, not
+merely after CI passes. CI cannot see a camera, and the iPhone scanning failure passed every
+automated check while being unusable on half the staff's phones.
+
+```powershell
+& 'C:\laragon\bin\git\bin\git.exe' tag -f last-known-good-deploy <verified-commit>
+& 'C:\laragon\bin\git\bin\git.exe' push origin last-known-good-deploy --force
+```
+
+**What a code rollback does not fix:** `vendor/` on the server is not replaced by a rollback
+unless you re-extract `vendor.zip` (see step 5). If the bad release added a dependency, the
+rolled-back code may reference a package the old `vendor/` does not contain. Re-extracting the
+zip from the rolled-back commit is part of rolling back.
+
 ---
 
 ## The development scripts are guarded

@@ -231,6 +231,83 @@ it('refuses a manager adding an outlet', function () {
     expect(Outlet::where('code', 'NEW-SITE')->exists())->toBeFalse();
 });
 
+// ---- Code lifetime ---------------------------------------------------
+
+it('lets the owner set a code lifetime from one minute to 24 hours', function () {
+    /*
+     * The ceiling was 600 seconds, so a manager asking for an hour was silently
+     * refused at validation — which reads as "the setting does not work" rather than
+     * "the value is out of range".
+     */
+    foreach ([60, 90, 300, 600, 3600, 21600, 86400] as $seconds) {
+        $this->patchJson("/api/v1/admin/outlets/{$this->ramal->id}", [
+            'qr_ttl_seconds' => $seconds,
+        ], asUser($this->owner))->assertOk();
+
+        expect($this->ramal->fresh()->qr_ttl_seconds)->toBe($seconds);
+    }
+});
+
+it('refuses a code lifetime below 30 seconds or above 24 hours', function () {
+    // Below 30s the code can expire between the device drawing it and a phone
+    // reading it. Above 24h it is a printed sheet pretending to be short-lived.
+    foreach ([0, 29, 86401] as $seconds) {
+        $this->patchJson("/api/v1/admin/outlets/{$this->ramal->id}", [
+            'qr_ttl_seconds' => $seconds,
+        ], asUser($this->owner))->assertStatus(422);
+    }
+
+    expect($this->ramal->fresh()->qr_ttl_seconds)->toBe(90);
+});
+
+it('applies a changed lifetime to the next issued code, not the current one', function () {
+    /*
+     * Changing the setting must not retroactively alter a code already on a device:
+     * its expiry was computed when it was generated. This is what stops a shorter
+     * window from instantly invalidating the code someone is looking at.
+     */
+    $this->ramal->update(['token_mode' => 'rotating', 'qr_ttl_seconds' => 3600]);
+
+    $first = $this->postJson("/api/v1/admin/outlets/{$this->ramal->id}/token", [], asUser($this->owner))
+        ->assertOk()
+        ->json('data.token');
+
+    $this->patchJson("/api/v1/admin/outlets/{$this->ramal->id}", [
+        'qr_ttl_seconds' => 60,
+    ], asUser($this->owner))->assertOk();
+
+    $second = $this->postJson("/api/v1/admin/outlets/{$this->ramal->id}/token", [], asUser($this->owner))
+        ->assertOk()
+        ->json('data.token');
+
+    $minutes = static fn (string $a, string $b): float => (strtotime($b) - strtotime($a)) / 60;
+
+    expect($minutes($first['issued_at'], $first['expires_at']))->toBeGreaterThan(50.0);
+    expect($minutes($second['issued_at'], $second['expires_at']))->toBeLessThan(2.0);
+});
+
+it('lets the owner edit an outlet name and photo requirement', function () {
+    /*
+     * Outlets could previously only be CREATED, so a typo in a name or a wrong photo
+     * setting was permanent — there was no way to correct an existing outlet at all.
+     */
+    $this->patchJson("/api/v1/admin/outlets/{$this->ramal->id}", [
+        'name' => 'Sungai Ramal (renamed)',
+        'requires_photo' => false,
+    ], asUser($this->owner))
+        ->assertOk()
+        ->assertJsonPath('data.name', 'Sungai Ramal (renamed)')
+        ->assertJsonPath('data.requires_photo', false);
+});
+
+it('refuses a manager editing an outlet they do not hold', function () {
+    $this->patchJson("/api/v1/admin/outlets/{$this->santai->id}", [
+        'name' => 'Taken over',
+    ], asUser($this->ramalManager))->assertStatus(404);
+
+    expect($this->santai->fresh()->name)->not->toBe('Taken over');
+});
+
 // ---- Accounts --------------------------------------------------------
 
 it('refuses a manager managing console accounts', function () {

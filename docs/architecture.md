@@ -176,14 +176,24 @@ re-transmitted) for break and clock-out.
 
 ```
 Display device                    Server
-     │ GET /display/{outlet}/token ─►│  no valid token? create one (TTL 90s)
+     │ GET /display/{outlet}/token ─►│  no valid token? create one (TTL from the outlet)
      │◄── { token, expires_at } ─────│
      │  (shows it with a countdown)  │
      │  polls every 30s              │
 ```
 
-TTL is 90 seconds rather than 60 to absorb clock skew and the time taken to
-frame a QR in a camera.
+**The lifetime is per outlet and configurable, 30 seconds to 24 hours.** The default is 90
+seconds rather than 60, to absorb clock skew and the time taken to frame a QR in a camera. The
+console offers 1 min / 90 s / 5 min / 10 min / 1 h / 6 h / 24 h.
+
+A long window is a real security trade and the UI says so at the point of choosing: a code
+photographed on Monday that still works on Sunday is effectively a printed sheet. **For a
+code that must last hours or days, `printed` is the honest choice** — it states outright
+that it is valid until reprinted, rather than implying it is short-lived.
+
+Changing the setting applies to the **next** issued code, never the current one. A code
+already on a device had its expiry computed when it was generated, and re-computing it
+would invalidate the code somebody is looking at right now.
 
 ### 6.3 Worked time
 
@@ -207,7 +217,7 @@ backwards would pay an hour of overtime for every hour of lunch.
 | Concern | Approach |
 |---|---|
 | Employee identity | PIN (bcrypt-hashed, 4–6 digits) + photo per punch |
-| Presence proof | Outlet QR token — rotating (90s) or printed (revocable) |
+| Presence proof | Outlet QR token — rotating (per-outlet TTL, 30s–24h) or printed (revocable) |
 | PIN brute force | Rate limit per token *and* per employee; lockout after N failures |
 | Token entropy | 32+ random bytes, URL-safe. Never sequential or guessable. |
 | Device keys | One per outlet display; revocable without affecting others |
@@ -228,7 +238,7 @@ costly and visible:
 
 | Control | Effect |
 |---|---|
-| Short-lived rotating code | A photographed code is worthless in ~90 seconds |
+| Rotating code, short lifetime | A photographed code goes stale — the shorter the window, the stronger. The console warns when a window is long enough to weaken this. |
 | Photo on every punch | Deters, and produces evidence for disputes |
 | Shift-window restriction | Punches far outside a scheduled shift are refused or flagged |
 | Same PIN, two outlets | Detected and queued for review |

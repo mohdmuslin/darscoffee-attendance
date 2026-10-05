@@ -424,6 +424,58 @@ cross-checking **the claim against the code**, not the code against itself.
 
 ---
 
+## 7. The scanner worked on Android and nothing else (a whole platform missing)
+
+Found in user testing, not by any test: **every iPhone showed a black rectangle and "This
+browser cannot scan QR codes".** Staff on iOS could not clock in at all.
+
+### What was wrong
+
+The scanner used `BarcodeDetector`, the browser's built-in QR API. It is not supported on
+iOS — not in Safari, not in iOS WebView, not on any iPhone regardless of age. The
+compatibility data is unambiguous:
+
+```
+BarcodeDetector | Chrome Android  — Full support
+                | Safari on iOS   — No support
+                | WebView on iOS  — No support
+                | Firefox Android — No support
+```
+
+The component then guarded on its absence and **returned before opening the camera**, so the
+failure was a dead preview rather than an error the employee could act on.
+
+### Why it shipped
+
+The code was written against the API rather than against the browsers staff actually use,
+and the guard made that look deliberate. It also passed every automated check: the test suite
+runs PHP, and none of it renders a camera. **A missing platform feature is invisible to
+server-side tests**, so this class of bug can only be caught by testing on the real devices.
+
+### The fix
+
+`jsQR` — a pure-JavaScript decoder that works everywhere — with `BarcodeDetector` kept as an
+**optional acceleration** for Android, where it is hardware-backed. The screen now degrades in
+speed rather than in availability, and the native path is never a requirement.
+
+Two related details:
+
+- The frame is sized by **aspect ratio**, not a fixed height. A fixed `h-72` box is *taller*
+  than it is wide on a phone, so the camera's landscape frame was stretched to fill it — the
+  long distorted preview staff also reported.
+- The decode canvas is **reused across frames**. Allocating one per frame at four frames a
+  second discards roughly a megabyte of bitmap ten times a second, which is what makes a cheap
+  phone stutter.
+
+### The lesson worth keeping
+
+**"It works on my phone" is not a test.** This reached production because the capability was
+assumed from the API's existence rather than verified against the platforms in use. When a
+feature depends on a browser API, the support matrix is part of the design — and the fallback
+has to be the thing that works, not the thing that is fastest.
+
+---
+
 ## What was decided without being asked
 
 Recorded here so the decisions can be reviewed rather than discovered:

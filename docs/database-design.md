@@ -58,7 +58,7 @@ nullable `users.id`.
 | address | varchar(255) NULL | |
 | timezone | varchar(64) | Default `Asia/Kuala_Lumpur`. Per-outlet so future expansion works. |
 | token_mode | ENUM('rotating','printed') | Default `rotating`. Which punch-code style this outlet uses. |
-| qr_ttl_seconds | int | Default 90. Rotating code lifetime. |
+| qr_ttl_seconds | int | Default 90. Rotating code lifetime, configurable 30–86400 (30s–24h). Ignored for `printed` outlets, which never expire. |
 | requires_photo | bool default true | Per-outlet; a shop may negotiate this away |
 | is_active | bool default true | |
 | timestamps | | |
