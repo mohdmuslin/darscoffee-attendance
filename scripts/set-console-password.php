@@ -1,5 +1,8 @@
 <?php
 
+use App\Models\User;
+use Illuminate\Contracts\Console\Kernel;
+
 /*
  * ONE-OFF UTILITY — sets new passwords for the seeded console accounts.
  *
@@ -39,9 +42,7 @@
 require __DIR__.'/vendor/autoload.php';
 
 $app = require_once __DIR__.'/bootstrap/app.php';
-$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
-
-use App\Models\User;
+$app->make(Kernel::class)->bootstrap();
 
 /*
  * The accounts to reset. Set a value in place of null to choose your own password; leaving it
