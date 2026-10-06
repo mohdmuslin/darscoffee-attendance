@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useTimesheetStore } from '../stores/timesheets';
 import { dateTime, dayStatusTone, businessDate, hm, timeOf, toIsoDate } from '../lib/format';
+import PunchPhotoDialog from '../components/PunchPhotoDialog.vue';
 
 const props = defineProps({
     id: { type: [String, Number], required: true },
@@ -14,6 +15,14 @@ const editing = ref(null);
 const changes = ref({});
 const reason = ref('');
 const problem = ref(null);
+
+/*
+ * The entry whose photographs are open, or null.
+ *
+ * Held on the view rather than inside the dialog so only one can ever be open, and so
+ * closing is a single assignment rather than something the dialog has to coordinate.
+ */
+const viewingPhotos = ref(null);
 
 /* Recording a punch for a day with nothing to amend. */
 const addingMissing = ref(false);
@@ -297,7 +306,25 @@ defineExpose({ lastOutletId });
                                     open
                                 </span>
                             </td>
-                            <td class="px-4 py-2 text-right">
+                            <td class="px-4 py-2 text-right whitespace-nowrap">
+                                <!--
+                                    The photo link appears only when a photo can actually be
+                                    shown — the URL is present only if the file still exists.
+                                    Offering a link to a purged photo would produce a broken
+                                    image, which reads as a broken app rather than an
+                                    expired record.
+                                -->
+                                <button
+                                    v-if="entry.started_photo_url || entry.ended_photo_url"
+                                    type="button"
+                                    class="mr-2 text-xs text-amber-900 underline"
+                                    @click="viewingPhotos = entry"
+                                >
+                                    Photo
+                                </button>
+
+                                <span v-else class="mr-2 text-xs text-stone-300" title="No photograph held for this punch">—</span>
+
                                 <button
                                     type="button"
                                     class="text-xs text-amber-900 underline"
@@ -471,4 +498,15 @@ defineExpose({ lastOutletId });
             </div>
         </div>
     </div>
+
+    <!--
+        Mounted at the top level, not inside the day loop: a dialog nested in a list row is
+        clipped by the row's overflow on narrow screens, and there is only ever one open.
+    -->
+    <PunchPhotoDialog
+        v-if="viewingPhotos"
+        :entry="viewingPhotos"
+        :title="store.timesheet?.employee?.name ?? 'Punch photo'"
+        @close="viewingPhotos = null"
+    />
 </template>

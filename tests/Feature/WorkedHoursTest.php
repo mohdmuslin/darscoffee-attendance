@@ -10,6 +10,7 @@ use App\Models\Outlet;
 use App\Models\Shift;
 use App\Models\TimeEntry;
 use App\Models\User;
+use App\Services\PhotoService;
 use App\Services\WorkedHoursService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
@@ -455,4 +456,78 @@ it('formats durations for a spreadsheet as decimal hours', function () {
 
 it('formats negative deltas without losing the sign', function () {
     expect($this->hours->hm(-30 * 60))->toBe('-30m');
+});
+
+// ---- Punch photographs ---------------------------------------------------
+
+/**
+ * The photos are the evidence that settles a dispute about when somebody arrived. They were
+ * captured and stored but never viewable, so these tests pin the two things that would make
+ * them viewable-but-wrong: a URL handed out for a file that is not there, and a URL pointing
+ * at the wrong photo.
+ */
+it('exposes a signed url for a clock-in photo that exists', function () {
+    $path = app(PhotoService::class)->storeBytes('fake-jpeg-bytes', 'punches');
+
+    segment($this->employee, $this->outlet, TimeEntryType::WORK, '09:00', '17:00');
+    TimeEntry::query()->latest('id')->first()->forceFill(['started_photo_path' => $path])->save();
+
+    $day = $this->hours->forDay($this->employee, $this->date, $this->outlet);
+    $entry = $day['entries'][0];
+
+    expect($entry['started_photo_url'])->toBeString();
+    expect($entry['started_photo_url'])->toContain('/photos/');
+    // No clock-out photo was set, so there must be no url claiming one exists.
+    expect($entry['ended_photo_url'])->toBeNull();
+});
+
+it('returns no url when the photo file has been purged', function () {
+    /*
+     * The retention job clears the column AND deletes the file, but a file can also go
+     * missing on its own — a partial restore, an interrupted purge. Handing the browser a
+     * URL to a missing file renders a broken image, which reads as a broken application
+     * rather than an expired record, so the check is on the FILE, not the column.
+     */
+    segment($this->employee, $this->outlet, TimeEntryType::WORK, '09:00', '17:00');
+
+    TimeEntry::query()->latest('id')->first()
+        ->forceFill(['started_photo_path' => 'punches/does-not-exist.jpg'])
+        ->save();
+
+    $day = $this->hours->forDay($this->employee, $this->date, $this->outlet);
+
+    // The column is filled, so the flag says a photo exists...
+    expect($day['entries'][0]['has_photo'])->toBeTrue();
+    // ...but no url is offered, because the file is not there to serve.
+    expect($day['entries'][0]['started_photo_url'])->toBeNull();
+});
+
+it('keeps clock-in and clock-out photos separate', function () {
+    // Swapping these would silently show the wrong evidence for the wrong end of a shift.
+    $in = app(PhotoService::class)->storeBytes('in-bytes', 'punches');
+    $out = app(PhotoService::class)->storeBytes('out-bytes', 'punches');
+
+    segment($this->employee, $this->outlet, TimeEntryType::WORK, '09:00', '17:00');
+
+    TimeEntry::query()->latest('id')->first()
+        ->forceFill(['started_photo_path' => $in, 'ended_photo_path' => $out])
+        ->save();
+
+    $entry = $this->hours->forDay($this->employee, $this->date, $this->outlet)['entries'][0];
+
+    // The two urls must differ, and each must point at its own file — checked by filename
+    // because the path is not url-encoded, only the signature is.
+    expect($entry['started_photo_url'])->not->toBe($entry['ended_photo_url']);
+    expect($entry['started_photo_url'])->toContain(basename($in));
+    expect($entry['ended_photo_url'])->toContain(basename($out));
+});
+
+it('reports no photo at all for an entry without one', function () {
+    segment($this->employee, $this->outlet, TimeEntryType::WORK, '09:00', '17:00');
+
+    $entry = $this->hours->forDay($this->employee, $this->date, $this->outlet)['entries'][0];
+
+    expect($entry['has_photo'])->toBeFalse();
+    expect($entry['started_photo_url'])->toBeNull();
+    expect($entry['ended_photo_url'])->toBeNull();
 });

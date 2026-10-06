@@ -243,6 +243,13 @@ costly and visible:
 | Shift-window restriction | Punches far outside a scheduled shift are refused or flagged |
 | Same PIN, two outlets | Detected and queued for review |
 | Above-average span | Flagged |
+
+> **The photos must be VIEWABLE, or they are not evidence.** They were captured and stored
+> from the start but no console screen displayed them — the API returned `has_photo` and nothing
+> read it, while the retention job deleted them after 90 days. The employee timesheet now shows
+> the clock-in and clock-out images side by side, and the same signed-URL mechanism serves
+> them: an `<img>` tag cannot carry an Authorization header, so a photo behind auth would
+> silently fail to render.
 | Manager review queue | Nothing anomalous passes silently |
 
 **Accepted residual risk:** if an outlet uses a *printed* code, that code can be

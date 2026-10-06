@@ -139,6 +139,27 @@ visible rather than impossible.
 > A manager who wants to defraud the system can. The design goal is that doing so
 > **leaves a trail** — a photo, a token, a timestamp and a review flag.
 
+### 5.5 Seeing the evidence
+
+A photo that nobody can look at is not evidence. Until this was added, punches DID capture
+photographs but the console had **no screen that displayed them** — the API returned a
+`has_photo` boolean and no view read it. The retention job then deleted them 90 days later,
+so the business paid the storage and PDPA cost of collecting evidence it could not use.
+
+The employee timesheet now offers a **Photo** link on any punch that has one, opening the
+clock-in and clock-out images side by side with the times they recorded. The pair is shown
+together because that is what settles a dispute: a photo is meaningless without the time it
+was taken, and a manager who has to close one to open the other concludes it is missing.
+
+Two details that are deliberate:
+
+- **The link appears only when the file still exists**, not merely when the column is filled.
+  After the retention purge the affordance disappears rather than showing a broken image,
+  which would read as a broken application instead of an expired record.
+- **A single photo is explained rather than hidden.** An open segment — clocked in, not yet
+  out — genuinely has one photo, and a manager who is not told that assumes the second failed
+  to save.
+
 ---
 
 ## 6. Time Rules

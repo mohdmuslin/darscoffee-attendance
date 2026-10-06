@@ -33,6 +33,12 @@ use Illuminate\Support\Collection;
 class WorkedHoursService
 {
     /**
+     * Photographs are signed per request. Built lazily so a timesheet that never shows a
+     * photo does not pay for the URL generation.
+     */
+    public function __construct(private readonly PhotoService $photos = new PhotoService) {}
+
+    /**
      * One employee's day, as a timesheet row.
      *
      * `$entries` and `$rules` are pre-fetched by `forPeriod()`, which knows them for the whole
@@ -528,6 +534,26 @@ class WorkedHoursService
              */
             'is_corrected' => $entry->status === TimeEntryStatus::CORRECTED,
             'has_photo' => $entry->started_photo_path !== null || $entry->ended_photo_path !== null,
+            /*
+             * Signed URLs for the punch photographs, so a manager can actually SEE the
+             * evidence rather than a flag saying evidence exists.
+             *
+             * Guarded by `exists()` rather than emitted whenever the column is filled: the
+             * retention job clears the column and deletes the file, but a file can also go
+             * missing on its own (a partial restore, an interrupted purge). Handing the
+             * browser a URL to a file that is not there renders a broken image, which reads
+             * as a broken application instead of an expired photo.
+             *
+             * Each is computed independently because a punch can legitimately have only one
+             * — a clock-in with no clock-out yet is an open segment, which is normal and not
+             * an error.
+             */
+            'started_photo_url' => $this->photos->exists($entry->started_photo_path)
+                ? $this->photos->temporaryUrl($entry->started_photo_path)
+                : null,
+            'ended_photo_url' => $this->photos->exists($entry->ended_photo_path)
+                ? $this->photos->temporaryUrl($entry->ended_photo_path)
+                : null,
             'is_offline_sync' => (bool) $entry->is_offline_sync,
             'note' => $entry->note,
         ];
