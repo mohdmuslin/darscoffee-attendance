@@ -1,21 +1,20 @@
 # Go-live checklist — Dars Attendance
 
-**Where things stand (24 Sept):**
+**Where things stand (6 Oct):**
 
 | | Status |
 |---|---|
-| App files on the server | ✅ Correct |
-| Document root | ✅ Correct |
-| **Application running** | ✅ **`/punch` and `/console` both load** |
+| Application running | ✅ `/punch` and `/console` both load |
 | `/.env` protected | ✅ 403 |
 | Install (`APP_KEY`, schema, seed) | ✅ Done |
-| **Permanent cron** | ✅ Added and **verified firing** |
-| **Seeded passwords** | ⚠️ **Still `password` — change today** |
-| FTP deploy | ❌ Broken (`530`) — blocks future releases |
+| Permanent cron | ✅ Added and **verified firing** |
+| **Deploy pipeline** | ✅ **Working** — the `530` was a stale FTP username |
+| Punch photos viewable | ✅ Timesheet → any punch → **Photo** |
+| **Seeded passwords** | ⚠️ **Still `password` — the one real exposure** |
+| iPhone scanning / camera shape | ✅ Fixed — **needs a real iPhone to confirm** |
 
-**The site works and the scheduled jobs run.** What remains is safety and maintainability: two
-passwords that are published in a public repository, and an FTP deploy that cannot ship a
-future release until it is fixed.
+**The system works and releases can ship.** What remains is the published passwords and a
+round of testing on real devices.
 
 ---
 
@@ -27,12 +26,10 @@ it but has no UI in front of it. So the two seeded accounts keep the password `p
 is **published in the public repository** — anyone who has seen it can sign in as owner and read
 every staff member's hours and photographs.
 
-Adding the missing screen is the real fix, but **the FTP deploy is broken (`530`)**, so no new
-code can reach the server yet. Use the script instead — it needs only File Manager and the cron
-job you already have working.
+Adding the missing screen is the proper fix. Until then, the script:
 
 **1. Upload** `scripts/set-console-password.php` to the **application root** (the folder
-containing `artisan`) — via File Manager → Upload.
+containing `artisan`) — File Manager → Upload.
 It must go in the app root, not `public/`, because its paths are relative to its own location.
 
 **2. Add a one-off cron job** — cPanel → Cron Jobs (`*` in the minute field is fine):
@@ -48,15 +45,9 @@ It must go in the app root, not `public/`, because its paths are relative to its
 
 > The script **deletes itself**, so a forgotten copy cannot be re-run later to reset the
 > passwords again. It prints whether that worked — if it says it could not, delete the file by
-> hand. Deleting a file in the app root is not possible over HTTP, so it is not web-reachable,
-> but remove it anyway.
+> hand. The app root is not reachable over HTTP, but remove it anyway.
 
 Then sign in at `https://attendance.darscoffee.com/console` to confirm the new password works.
-
-> **Worth fixing properly:** once the FTP deploy is repaired, add a change-password screen.
-> Until then, changing a password means repeating this. Note that both accounts are now random
-> 24-character strings, so they need to be stored somewhere a manager can reach — hand them over
-> in person or by whatever channel you use for credentials, not in a shared document.
 
 ## 2. ✅ Permanent cron — done and verified
 
@@ -66,9 +57,9 @@ cPanel → **Cron Jobs**, every minute:
 * * * * * cd /home/mwstayco/attendance.darscoffee.com/attendance && /usr/local/bin/php artisan schedule:run >> /dev/null 2>&1
 ```
 
-**This was verified, not assumed.** That matters here because cron redirects its output to
-`/dev/null`, so a wrong PHP path or a wrong directory fails **completely silently** — no error,
-no log, and the only symptom appears days later as "the app stopped working".
+**This was verified, not assumed.** cron redirects its output to `/dev/null`, so a wrong PHP
+path or a wrong directory fails **completely silently** — no error, no log, and the only symptom
+appears days later as "the app stopped working".
 
 To re-verify at any time, temporarily log instead of discarding:
 
@@ -76,10 +67,10 @@ To re-verify at any time, temporarily log instead of discarding:
 * * * * * cd /home/mwstayco/attendance.darscoffee.com/attendance && /usr/local/bin/php artisan schedule:run >> /home/mwstayco/schedule.log 2>&1
 ```
 
-Any readable output — even just `No scheduled commands are ready to run.` — proves cron fired,
-the PHP path is right, and the directory is right. Then switch back to `>> /dev/null 2>&1`.
+Any readable output — even `No scheduled commands are ready to run.` — proves cron fired, the
+PHP path is right, and the directory is right. Then switch back to `>> /dev/null 2>&1`.
 
-**What is scheduled** (confirmed locally with `php artisan schedule:list`):
+**What is scheduled** (confirmed with `php artisan schedule:list`):
 
 ```
 0 19 * * *  attendance:purge-photos        -> 03:00 Kuala Lumpur
@@ -97,92 +88,105 @@ Lumpur — deleting photographs while the console is in use.
   screen. Nobody at the counter can work out why.
 - Photographs are kept past the retention window, which is a PDPA gap nobody notices.
 
-## 3. Fix the FTP deploy (5 min)
+## 3. ✅ The FTP deploy is fixed
 
-No future release can ship until this is done. Every deploy since the FTP account's Directory
-was changed fails with:
+The two-week outage was a **stale username**, not a password. cPanel names FTP accounts
+`<user>@<domain>`, and when the account was recreated after the app moved it was named against
+`attendance.darscoffee.com`. A **missing account** answers `530 Login authentication failed`,
+which is identical to a wrong password — so it read as a credentials problem and re-entering
+the password could not fix it.
 
+The `FTP_USERNAME` secret is now `darscoffeeeftipi@attendance.darscoffee.com`, and deploys
+succeed.
+
+**If it breaks again**, `scripts/ftp-login-check.ps1` separates the two causes — run it with
+its **absolute path**:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "c:\Users\User\CustomerDatabase\Dars Attendance\scripts\ftp-login-check.ps1"
 ```
-FTPError: 530 Login authentication failed
-```
-
-The password worked before that edit — **editing an FTP account in cPanel can invalidate its
-stored password.** Run:
-
-```
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\ftp-login-check.ps1
-```
-
-It asks for the password at runtime (hidden — never printed, never saved) and lists the
-directory FTP lands in.
 
 | Result | Meaning | Fix |
 |---|---|---|
-| **LOGIN FAILED** | the cPanel account/password is wrong | cPanel → FTP Accounts → change the password, then update the GitHub secret |
-| **LOGIN OK** | the server is fine; the secret is stale | delete the `FTP_PASSWORD` secret and re-add it by **pasting** |
+| **LOGIN FAILED** | the cPanel account/password is wrong | cPanel → FTP Accounts → check the account exists, then its password |
+| **LOGIN OK** | the server is fine; the secret is stale | delete the `FTP_PASSWORD` secret and re-add by **pasting** |
 
-A trailing newline pasted into a secret produces exactly this 530.
+Also remember: **the deploy gates on CI**, so a failing *code-style* check blocks shipping just
+as effectively as a broken test. Run `pint` before pushing.
 
-## 4. Test a staff photograph (2 min)
+## 4. Test on a real iPhone (5 min)
 
-Open **Employees** → an employee with a photograph. **It must render.**
+**The most important remaining test.** The scanner previously used `BarcodeDetector`, which
+does not exist on **any** iOS device, so every iPhone showed a black rectangle. It now uses
+`jsQR`, which works everywhere, with the native API kept as an Android speed-up — but **no
+automated test can open a camera**, so this can only be confirmed by hand.
+
+On an iPhone:
+1. Open `https://attendance.darscoffee.com/punch`
+2. Allow camera access
+3. **The preview should be the normal 4:3 shape, not a stretched rectangle**
+4. Point it at a printed code — it should scan
+5. Complete a clock-in, including the photo
+
+Also worth testing on Android, to confirm the fast path still works.
+
+## 5. Confirm the punch photos and the code lifetime
+
+- **Employees** → open an employee → timesheet → **Photo** on any punch. Both clock-in and
+  clock-out images should show with their times.
+- **Outlets** → **Edit** on an outlet → change *Code expires after*. The range is 30 seconds to
+  24 hours. A window above 10 minutes shows a warning — that is deliberate: a photographed code
+  that stays valid for hours is effectively a printed sheet, and `Printed` mode says so honestly.
+
+## 6. Test a staff profile photograph
+
+Open **Employees** → an employee with a photograph. It must render.
 
 If it 403s while the rest of the console works, add `TRUSTED_PROXIES=*` to `.env` (see
 `docs/deployment.md` step 3). This is the one setting that fails *only* for photographs, so it
 is easy to miss — test once on wifi and once on mobile data.
 
-## 5. Then the full list
+## 7. Then the full list
 
 `docs/deployment.md` → **Step 9, Go-live checks** — 12 checks ending with a real phone scanning
 a printed QR, a clock in/out, and an offline punch that syncs.
 
 ---
 
-## Completed: how the deployment was unblocked
+## Rollback
 
-Kept brief; the detail is in `docs/deployment.md`.
+The tag **`last-known-good-deploy`** points at the last commit verified working on the live
+site. Procedure, plus what a code rollback does *not* fix, is in `docs/deployment.md` →
+**Rollback**.
 
-1. **The upload failed for weeks on FTPS.** Every TLS *data* connection failed with
-   `SSL alert number 50`. Two earlier explanations were wrong — first "too slow" (the transfer
-   was cut from 8,599 files to ~250 and it still failed, in 4 minutes), then "the payload". The
-   real cause was the transport: the action bundles a `basic-ftp` version that Node 24 broke,
+Move the tag forward only after confirming on the **live site**, not merely when CI is green.
+
+---
+
+## How the deployment was unblocked
+
+Kept brief; the detail is in `docs/deployment.md` and `docs/hardening.md`.
+
+1. **Uploads failed for weeks on FTPS.** Every TLS *data* connection failed with
+   `SSL alert number 50`. Two earlier explanations were wrong: first "too slow" (the transfer
+   was cut from 8,599 files to ~250 and still failed, in 4 minutes), then "the payload". The
+   real cause was the transport — the action bundles a `basic-ftp` version that Node 24 broke,
    and no setting or upgrade fixes it. Now **plain FTP**, verified permitted beforehand.
 2. **The document root pointed at an empty folder**, and cPanel would not allow a root outside
-   `/home/mwstayco/attendance.darscoffee.com/`, so the app was **moved** into that tree.
+   the subdomain folder, so the app was **moved** into that tree.
 3. **`public/index.php` was missing** — the FTP tool's sync-state file had travelled with the
    moved folder and still claimed it was deployed. Fixed by renaming `state-name`.
-4. **The final 500 was a missing `storage/` tree.** The deploy excludes `storage/**` on purpose
-   (it protects the photographs), so a fresh server has no `storage/framework/{views,cache}`
-   and no `storage/logs`. The give-away was a 500 **with an empty log** — the error had nowhere
-   to be written. `attendance:install` creates the tree as its first action, then generates
-   `APP_KEY`, migrates and seeds.
+4. **The 500 was a missing `storage/` tree.** The deploy excludes `storage/**` on purpose (it
+   protects the photographs), so a fresh server has none of it. The give-away was a 500 **with an
+   empty log** — the error had nowhere to be written. `attendance:install` creates it first.
+5. **The remaining `530` was a stale FTP username**, not the password.
+6. **iPhone scanning was a missing browser API**, not a bug in the code — see
+   `docs/hardening.md` §7.
+7. **Punch photographs were captured but not viewable** — the API returned a boolean and no
+   screen read it.
 
-> **Same pattern for any fresh Laravel deploy over FTP:** a 500 with an empty log almost always
-> means the `storage/` tree is missing, not that the code is broken.
+> **Two patterns worth keeping.** A 500 *with an empty log* almost always means the `storage/`
+> tree is missing, not that the code is broken. And when a login fails, **verify the account
+> exists before touching the password** — a missing account and a wrong password answer with the
+> same code.
 
-### The layout, for reference
-
-```
-/home/mwstayco/attendance.darscoffee.com/
-  public/            <- leftover empty folder. NOT the docroot.
-  attendance/        <- the Laravel application root
-    artisan   app/   bootstrap/   config/   storage/
-    .env             <- lives here (one only)
-    vendor.zip       <- must be re-extracted after any dependency change
-    vendor/          <- extracted from vendor.zip
-    public/          <- DOCROOT: index.php + build/
-```
-
-App root: `/home/mwstayco/attendance.darscoffee.com/attendance`
-
-**One manual step that is easy to forget:** after any release that changes dependencies,
-re-extract `vendor.zip` in the app root. Each deploy replaces the zip, but the app keeps using
-the `vendor/` extracted from the old one — so a new package can appear installed when it is
-not. That failure looks like a code bug.
-
-> **Every push to `main` deploys automatically** once the repository variable
-> `FTP_DEPLOY_ENABLED` is `true` (Settings → Secrets and variables → Actions → Variables).
-> Until it is `true`, runs are rehearsals that report without transferring.
->
-> A deploy does **not** apply migrations — see `docs/deployment.md` step 7 for the cron method
-> that does.
